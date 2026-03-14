@@ -1,0 +1,6 @@
+discord.py>=2.3.2
+python-dotenv>=1.0.1
+uvicorn>=0.30.0
+fastapi>=0.100.0
+requests>=2.31.0
+typing-extensions>=4.8.0

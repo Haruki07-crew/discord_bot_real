@@ -1,0 +1,6 @@
+{
+  "python.defaultInterpreterPath": "/Users/higashiharaharuki/miniconda3/bin/python",
+  "python.analysis.extraPaths": [
+    "/Users/higashiharaharuki/miniconda3/lib/python3.13/site-packages"
+  ]
+}
