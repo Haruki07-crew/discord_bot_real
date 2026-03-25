@@ -1,0 +1,22 @@
+【何をする関数？】
+新しいユーザーをデータベースに登録する。
+AtCoderユーザー名とDiscordユーザー情報を users テーブルに追加する。
+
+【引数（入力）の説明】
+atcoder_name: AtCoderのユーザー名（例: "tourist"）
+discord_name: Discordのユーザー名（例: "tourist#1234"）
+discord_id: DiscordユーザーのID番号（整数）
+resister_id: 登録を行ったDiscordユーザーのID番号（管理者など）
+db_file: データベースファイルのパス（例: "database.db"）
+
+【戻り値（出力）の説明】
+なし（None）。データベースに追加するだけで何も返さない。
+
+【どんな時に使う？】
+Discordで「ユーザーを登録する」コマンドが実行されたときに呼び出す。
+
+【ポイント・注意点】
+通常の関数（asyncではない）なので await は不要
+atcoder_name が PRIMARY KEY（主キー）なので、同じユーザー名で2回登録しようとするとエラーになる
+登録前に get_registered_user で重複確認するのが一般的な使い方
+resister_id は「誰が登録したか」の記録（管理ログ用途）
