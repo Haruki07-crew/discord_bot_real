@@ -107,28 +107,37 @@ async def daily_update():
       except Exception as e:
         print(f"[auto_period_ranking] Error posting [{label}]: {e}")
 
-  # 今後のABCコンテストを毎日投稿
+  # 新規の今後ABCコンテストのみ投稿（既に通知済みのものはスキップ）
+  WEEKDAY_JA = ["月", "火", "水", "木", "金", "土", "日"]
   try:
     upcoming = await get_upcoming_abc_contests(days=14)
-    if upcoming:
+    new_contests = [
+      c for c in upcoming
+      if not is_contest_auto_posted(f"upcoming_{c['id']}", DB_FILE)
+    ]
+    if new_contests:
       embed = discord.Embed(
         title="📅 今後のABCコンテスト",
         color=0x1abc9c,
         timestamp=datetime.datetime.now(JST)
       )
-      for c in upcoming:
+      for c in new_contests:
         start_dt = datetime.datetime.fromtimestamp(c["start_epoch_second"], tz=JST)
         duration_min = c["duration_second"] // 60
+        weekday_ja = WEEKDAY_JA[start_dt.weekday()]
+        date_str = f"{start_dt.strftime('%m/%d')}({weekday_ja}) {start_dt.strftime('%H:%M')}"
+        rate_change = c.get("rate_change", "?")
         embed.add_field(
           name=c["title"],
           value=(
-            f"開始: **{start_dt.strftime('%m/%d(%a) %H:%M')} JST**\n"
-            f"時間: {duration_min}分　レート対象: {c.get('rate_change', '?')}"
+            f"**{date_str} JST** にレート対象 **{rate_change}** のコンテストがあります\n"
+            f"時間: {duration_min}分"
           ),
           inline=False
         )
+        mark_contest_auto_posted(f"upcoming_{c['id']}", DB_FILE)
       await channel.send(embed=embed)
-      print("[daily_update] Posted upcoming ABC contests")
+      print(f"[daily_update] Posted {len(new_contests)} new upcoming ABC contests")
   except Exception as e:
     print(f"[daily_update] Error posting upcoming contests: {e}")
 
