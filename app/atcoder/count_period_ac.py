@@ -17,12 +17,12 @@ async def count_period_ac(atcoder_name, day, db_file="database.db"):
   with sqlite3.connect(db_file) as conn:
     cursor = conn.cursor()
     cursor.execute(
-      "SELECT submission_last_id FROM progress_cache_meta WHERE atcoder_name = ?",
+      "SELECT submission_last_id FROM update_bookmark WHERE atcoder_name = ?",
       (atcoder_name,)
     )
     meta = cursor.fetchone()
 
-  if meta is not None:
+  if meta is not None and meta[0] and meta[0] > 0:
     with sqlite3.connect(db_file) as conn:
       cursor = conn.cursor()
       cursor.execute("""

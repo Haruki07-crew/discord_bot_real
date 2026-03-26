@@ -7,10 +7,11 @@ async def get_ac_count(atcoder_name, db_file="database.db"):
   with sqlite3.connect(db_file) as conn:
     cursor = conn.cursor()
     cursor.execute(
-      "SELECT 1 FROM progress_cache_meta WHERE atcoder_name = ?",
+      "SELECT submission_last_id FROM update_bookmark WHERE atcoder_name = ?",
       (atcoder_name,)
     )
-    if cursor.fetchone():
+    row = cursor.fetchone()
+    if row and row[0] and row[0] > 0:
       cursor.execute(
         "SELECT COUNT(DISTINCT problem_id) FROM ac_submissions_cache WHERE atcoder_name = ?",
         (atcoder_name,)
