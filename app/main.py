@@ -260,26 +260,30 @@ async def rating_command(interaction: discord.Interaction, atcoder_name: str):
 @tree.command(name = "user_resister", description="ユーザーを登録します")
 async def user_resister(interaction: discord.Interaction, atcoder_name: str, discord_user: discord.Member):
   await interaction.response.defer()
-  resister_id = interaction.user.id
-  discord_name = discord_user.display_name
-  discord_id = discord_user.id
+  try:
+    resister_id = interaction.user.id
+    discord_name = discord_user.display_name
+    discord_id = discord_user.id
 
-  exist_user = get_registered_user(atcoder_name, DB_FILE)
-  if exist_user:
-    await interaction.followup.send(f"⚠️エラー: {atcoder_name} さんはすでに<@{exist_user[1]}>さんによって登録されています")
-    return
-  check = await get_latest_rating_nofstring(atcoder_name)
-  if "存在しません" in str(check):
-    await interaction.followup.send(f"⚠️エラー : {atcoder_name}は存在しません")
-    return
-  register_user(atcoder_name, discord_name, discord_id, resister_id, DB_FILE)
-  await interaction.followup.send(
-    f"{discord_name} さんを {atcoder_name} で登録しました\n"
-    f"提出履歴を取得中です...（提出数が多い場合は数分かかります）"
-  )
-  await asyncio.sleep(1.0)  # 存在確認のAtCoder APIから1秒空けてから全件取得
-  await initial_fetch_user_data(atcoder_name, DB_FILE)
-  await interaction.followup.send(f"✅ {atcoder_name} のデータ取得が完了しました")
+    exist_user = get_registered_user(atcoder_name, DB_FILE)
+    if exist_user:
+      await interaction.followup.send(f"⚠️エラー: {atcoder_name} さんはすでに<@{exist_user[1]}>さんによって登録されています")
+      return
+    check = await get_latest_rating_nofstring(atcoder_name)
+    if "存在しません" in str(check):
+      await interaction.followup.send(f"⚠️エラー : {atcoder_name}は存在しません")
+      return
+    register_user(atcoder_name, discord_name, discord_id, resister_id, DB_FILE)
+    await interaction.followup.send(
+      f"{discord_name} さんを {atcoder_name} で登録しました\n"
+      f"提出履歴を取得中です...（提出数が多い場合は数分かかります）"
+    )
+    await asyncio.sleep(1.0)  # 存在確認のAtCoder APIから1秒空けてから全件取得
+    await initial_fetch_user_data(atcoder_name, DB_FILE)
+    await interaction.followup.send(f"✅ {atcoder_name} のデータ取得が完了しました")
+  except Exception as e:
+    print(e)
+    await interaction.followup.send(content=f"⚠️ エラーが発生しました。お手数ですが(<@{admin_id}>)までご連絡ください。")
 
 
 ## @brief user_unresister の atcoder_name オートコンプリート (登録済みユーザー一覧)
@@ -580,7 +584,7 @@ async def on_app_command_error(interaction: discord.Interaction, error: app_comm
   print(f"コマンド'{interaction.command.name}'でエラー発生")
   try:
     if interaction.response.is_done():
-      await interaction.edit_original_response(content=error_message, embed=None)
+      await interaction.followup.send(content=error_message, ephemeral=True)
     else:
       await interaction.response.send_message(error_message, ephemeral=True)
     admin = await client.fetch_user(admin_id)
