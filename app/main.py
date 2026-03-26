@@ -282,11 +282,22 @@ async def user_resister(interaction: discord.Interaction, atcoder_name: str, dis
   await interaction.followup.send(f"✅ {atcoder_name} のデータ取得が完了しました")
 
 
+## @brief user_unresister の atcoder_name オートコンプリート (登録済みユーザー一覧)
+async def registered_atcoder_autocomplete(interaction: discord.Interaction, current: str):
+  users = get_user_dict(DB_FILE)
+  return [
+    app_commands.Choice(name=f"{atcoder} ({discord_name})", value=atcoder)
+    for atcoder, discord_name in users.items()
+    if current.lower() in atcoder.lower()
+  ][:25]
+
+
 ## @brief ユーザーの登録を解除するコマンド
 ## @details 登録者本人またはadminのみ解除可能
 ## @param interaction Discordのインタラクション
 ## @param atcoder_name 登録解除するAtCoderユーザー名
 @tree.command(name = "user_unresister", description="登録されているユーザーの登録を解除します")
+@app_commands.autocomplete(atcoder_name=registered_atcoder_autocomplete)
 async def user_unresister(interaction: discord.Interaction, atcoder_name: str):
   await interaction.response.defer()
   user_id = interaction.user.id
