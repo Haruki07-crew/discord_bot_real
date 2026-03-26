@@ -1,0 +1,254 @@
+================================================================
+atcoder/ 関数一覧 & 使用箇所
+================================================================
+
+----------------------------------------------------------------
+AC_fight.py : AC_fight(user_name_dict, day, db_file)
+----------------------------------------------------------------
+全ユーザーの指定期間内AC数を取得し、AC数の多い順に並べたリストを返す。
+使用箇所:
+  - make_ranking.py        (内部関数)
+  - make_growth_ranking.py (内部関数)
+
+----------------------------------------------------------------
+AC_print.py : AC_print(atcoder_name, db_file)
+----------------------------------------------------------------
+ユーザーの総AC数と今日のAC数・点数をまとめたメッセージ文字列を返す。
+使用箇所:
+  - 現在 main.py からは直接呼ばれていない (エクスポート済み)
+
+----------------------------------------------------------------
+count_period_ac.py : count_period_ac(atcoder_name, day, db_file)
+----------------------------------------------------------------
+指定期間内のAC数と合計点数を [AC数, 合計点数] で返す。
+使用箇所:
+  - AC_fight.py                (内部関数)
+  - AC_print.py                (内部関数)
+  - get_ac_rate_change_data.py (内部関数)
+  - main.py → /syozin スラッシュコマンド
+
+----------------------------------------------------------------
+count_period_ac2.py : count_period_ac2(atcoder_name, day)
+----------------------------------------------------------------
+count_period_ac の拡張版。AC数・合計点数・難易度合計を返す。
+使用箇所:
+  - 現在 main.py からは直接呼ばれていない (エクスポート済み)
+
+----------------------------------------------------------------
+create_ac_rate_graph.py : create_ac_rate_graph(user_data, label)
+----------------------------------------------------------------
+AC数 vs レート変化の散布図グラフ画像を BytesIO で返す。
+使用箇所:
+  - main.py → /ac_fight スラッシュコマンド (期間 <= 7日)
+  - main.py → /diligence_growth スラッシュコマンド (期間 <= 7日)
+  - main.py → _post_period_summary (daily_update タスク内)
+
+----------------------------------------------------------------
+create_progress_graph.py : create_progress_graph(all_user_data)
+----------------------------------------------------------------
+AC数 vs レートの折れ線グラフ画像を BytesIO で返す。
+使用箇所:
+  - main.py → /ac_fight スラッシュコマンド (期間 > 7日)
+  - main.py → /diligence_growth スラッシュコマンド (期間 > 7日)
+  - main.py → _post_period_summary (daily_update タスク内)
+
+----------------------------------------------------------------
+delete_user.py : delete_user(atcoder_name, db_file)
+----------------------------------------------------------------
+users テーブルから指定ユーザーを削除する。
+使用箇所:
+  - main.py → /user_unresister スラッシュコマンド
+
+----------------------------------------------------------------
+fetch_and_cache_ac_submissions.py : fetch_and_cache_ac_submissions(atcoder_name, db_file)
+----------------------------------------------------------------
+AtCoder AC提出をAPIから取得し ac_submissions_cache テーブルに保存する。
+使用箇所:
+  - initial_fetch_user_data.py (内部関数)
+
+----------------------------------------------------------------
+fetch_and_cache_contest_history.py : fetch_and_cache_contest_history(atcoder_name, db_file)
+----------------------------------------------------------------
+AtCoder コンテスト履歴をAPIから取得し contest_history テーブルに保存する。
+使用箇所:
+  - initial_fetch_user_data.py (内部関数)
+
+----------------------------------------------------------------
+fetch_problem.py : fetch_problem()
+----------------------------------------------------------------
+kenkoooo の problem-models.json を取得してキャッシュする。
+使用箇所:
+  - count_period_ac2.py (内部関数)
+
+----------------------------------------------------------------
+get_abc_standings.py : get_abc_standings(contest_number, db_file)
+----------------------------------------------------------------
+指定ABCコンテストの結果APIを叩き、登録ユーザーを rated / unrated に分けて返す。
+使用箇所:
+  - main.py → /abc_ranking スラッシュコマンド
+  - main.py → auto_abc_ranking タスク
+
+----------------------------------------------------------------
+get_ac_count.py : get_ac_count(atcoder_name, db_file)
+----------------------------------------------------------------
+ユーザーの総AC数を返す（DBキャッシュ優先、なければAPI）。
+使用箇所:
+  - AC_print.py (内部関数)
+  - main.py → /syozin スラッシュコマンド
+
+----------------------------------------------------------------
+get_ac_rate_change_data.py : get_ac_rate_change_data(user_dict, days, db_file)
+----------------------------------------------------------------
+全ユーザーの指定期間内のAC数とレート変化を辞書で返す。
+使用箇所:
+  - make_growth_ranking.py (内部関数)
+  - main.py → /ac_fight スラッシュコマンド (期間 <= 7日)
+
+----------------------------------------------------------------
+get_all_users_with_discord_id.py : get_all_users_with_discord_id(db_file)
+----------------------------------------------------------------
+users テーブルから全ユーザー (atcoder_name, discord_name, discord_id) を取得する。
+使用箇所:
+  - 現在 main.py からは直接呼ばれていない (エクスポート済み)
+
+----------------------------------------------------------------
+get_diff.py : get_diff(raw_diff)
+----------------------------------------------------------------
+問題の生difficulty値を加工して返す (None→None, 負→30, 正→そのまま)。
+使用箇所:
+  - count_period_ac2.py (内部関数)
+
+----------------------------------------------------------------
+get_latest_rating.py : get_latest_rating(atcoder_name)
+----------------------------------------------------------------
+AtCoder APIからレートを取得し「〇〇の現在のレートは〇〇です」という文字列を返す。
+使用箇所:
+  - 現在 main.py からは直接呼ばれていない (エクスポート済み)
+
+----------------------------------------------------------------
+get_latest_rating_from_db.py : get_latest_rating_from_db(atcoder_name, db_file)
+----------------------------------------------------------------
+contest_history テーブルから最新レートを取得する。
+使用箇所:
+  - main.py → /user_list スラッシュコマンド
+
+----------------------------------------------------------------
+get_latest_rating_nofstring.py : get_latest_rating_nofstring(atcoder_name)
+----------------------------------------------------------------
+AtCoder APIからレートを数値で返す (文字列ではなく int)。
+使用箇所:
+  - main.py → /user_resister スラッシュコマンド (ユーザー存在確認)
+
+----------------------------------------------------------------
+get_progress_data.py : get_progress_data(atcoder_name, days, db_file)
+----------------------------------------------------------------
+指定期間のコンテスト参加ポイント列 [(AC数, レート), ...] を返す（グラフ用）。
+使用箇所:
+  - main.py → /ac_fight スラッシュコマンド (期間 > 7日)
+  - main.py → /diligence_growth スラッシュコマンド (期間 > 7日)
+  - main.py → _post_period_summary (daily_update タスク内)
+
+----------------------------------------------------------------
+get_rate_heart.py : get_rate_heart(rating)
+----------------------------------------------------------------
+レート値に応じたハートの絵文字を返す。
+使用箇所:
+  - main.py → /user_list スラッシュコマンド
+
+----------------------------------------------------------------
+get_registered_user.py : get_registered_user(atcoder_name, db_file)
+----------------------------------------------------------------
+users テーブルから (discord_name, resister_id) を取得する。
+使用箇所:
+  - main.py → /user_resister スラッシュコマンド (二重登録チェック)
+
+----------------------------------------------------------------
+get_resister_id.py : get_resister_id(atcoder_name, db_file)
+----------------------------------------------------------------
+users テーブルから登録者の resister_id を取得する。
+使用箇所:
+  - main.py → /user_unresister スラッシュコマンド (権限チェック)
+
+----------------------------------------------------------------
+get_user_dict.py : get_user_dict(db_file)
+----------------------------------------------------------------
+users テーブルから {atcoder_name: discord_name} の辞書を返す。
+使用箇所:
+  - main.py → /user_list スラッシュコマンド
+  - main.py → /ac_fight スラッシュコマンド
+  - main.py → /diligence_growth スラッシュコマンド
+  - main.py → daily_update タスク
+  - main.py → _post_period_summary (daily_update タスク内)
+
+----------------------------------------------------------------
+init_auto_post_table.py : init_auto_post_table(db_file)
+----------------------------------------------------------------
+auto_posted_contests テーブルを作成する (なければ)。
+使用箇所:
+  - init_db.py (内部関数)
+
+----------------------------------------------------------------
+init_db.py : init_db(db_file)
+----------------------------------------------------------------
+Bot起動時にDBの全テーブルを初期化する。
+使用箇所:
+  - main.py → on_ready イベント
+
+----------------------------------------------------------------
+init_progress_tables.py : init_progress_tables(db_file)
+----------------------------------------------------------------
+contest_history / ac_submissions_cache / update_bookmark テーブルを作成する。
+使用箇所:
+  - init_db.py (内部関数)
+
+----------------------------------------------------------------
+initial_fetch_user_data.py : initial_fetch_user_data(atcoder_name, db_file)
+----------------------------------------------------------------
+コンテスト履歴とAC提出を両方取得してDBに保存する (ユーザー登録時の初回取得)。
+使用箇所:
+  - main.py → /user_resister スラッシュコマンド (登録後の初回データ取得)
+  - main.py → daily_update タスク (毎日1時の自動更新)
+
+----------------------------------------------------------------
+is_contest_auto_posted.py : is_contest_auto_posted(contest_id, db_file)
+----------------------------------------------------------------
+指定コンテストが既に自動投稿済みかどうかを返す。
+使用箇所:
+  - main.py → auto_abc_ranking タスク (二重投稿防止)
+
+----------------------------------------------------------------
+make_growth_ranking.py : make_growth_ranking(user_name_dict, day, db_file)
+----------------------------------------------------------------
+レート変化を第1キー・AC数を第2キーにしたランキングリストを返す。
+使用箇所:
+  - main.py → /diligence_growth スラッシュコマンド
+  - main.py → _post_period_summary (daily_update タスク内)
+
+----------------------------------------------------------------
+make_ranking.py : make_ranking(user_name_dict, day, db_file)
+----------------------------------------------------------------
+AC数を主軸にしたランキングリストを返す。
+使用箇所:
+  - main.py → /ac_fight スラッシュコマンド
+
+----------------------------------------------------------------
+mark_contest_auto_posted.py : mark_contest_auto_posted(contest_id, db_file)
+----------------------------------------------------------------
+指定コンテストを自動投稿済みとして auto_posted_contests テーブルに記録する。
+使用箇所:
+  - main.py → auto_abc_ranking タスク
+
+----------------------------------------------------------------
+parse_atcoder_time.py : parse_atcoder_time(end_time_str)
+----------------------------------------------------------------
+AtCoder のコンテスト終了時刻文字列を datetime オブジェクトに変換する。
+使用箇所:
+  - get_ac_rate_change_data.py (内部関数)
+  - get_progress_data.py       (内部関数)
+
+----------------------------------------------------------------
+register_user.py : register_user(atcoder_name, discord_name, discord_id, resister_id, db_file)
+----------------------------------------------------------------
+users テーブルに新規ユーザーを INSERT する。
+使用箇所:
+  - main.py → /user_resister スラッシュコマンド

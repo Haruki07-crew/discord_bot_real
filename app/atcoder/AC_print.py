@@ -1,5 +1,4 @@
 async def AC_print(atcoder_name, db_file="database.db"):
-  # get_ac_count と count_period_ac は atcoder.ac_count から使用
   from atcoder.get_ac_count import get_ac_count
   from atcoder.count_period_ac import count_period_ac
   ac_sum = await get_ac_count(atcoder_name, db_file)

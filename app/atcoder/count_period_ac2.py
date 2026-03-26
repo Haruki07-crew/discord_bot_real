@@ -5,7 +5,6 @@ from datetime import datetime, timezone, timedelta
 import discord_logger
 
 async def count_period_ac2(atcoder_name, day):
-  # fetch_problem と get_diff は atcoder.problem から使用
   from atcoder.fetch_problem import fetch_problem
   from atcoder.get_diff import get_diff
   model = await fetch_problem()
