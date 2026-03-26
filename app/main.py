@@ -209,6 +209,42 @@ async def on_ready():
   print("activate the bot  now!!!!")
 
 
+TEST_USERS = [
+  "hanaosi", "yuukougun", "bandai0412", "ponkura", "sky7",
+  "KawataAki", "misuke3779", "yudai17", "asyogo", "mrkm1627",
+  "googology", "Un_titled"
+]
+
+@client.event
+async def on_message(message):
+  if message.author.bot:
+    return
+  if message.content.strip() != "テスト用にユーザー登録":
+    return
+
+  bot_user = client.user
+  discord_name = bot_user.display_name
+  discord_id = bot_user.id
+  resister_id = bot_user.id
+
+  await message.channel.send(f"テスト用ユーザー登録を開始します（{len(TEST_USERS)}人）...")
+
+  for atcoder_name in TEST_USERS:
+    try:
+      exist = get_registered_user(atcoder_name, DB_FILE)
+      if exist:
+        await message.channel.send(f"⏭️ {atcoder_name} は既に登録済みです")
+        continue
+      register_user(atcoder_name, discord_name, discord_id, resister_id, DB_FILE)
+      await message.channel.send(f"📥 {atcoder_name} を登録しました。データ取得中...")
+      await initial_fetch_user_data(atcoder_name, DB_FILE)
+      await message.channel.send(f"✅ {atcoder_name} 完了")
+    except Exception as e:
+      await message.channel.send(f"⚠️ {atcoder_name} の登録に失敗: {e}")
+
+  await message.channel.send("✅ テスト用ユーザー登録がすべて完了しました！")
+
+
 ## @brief ユーザーの精進記録をEmbedで返すコマンド
 ## @details 今日および通算のAC数・獲得点数を表示する
 ## @param interaction Discordのインタラクション
