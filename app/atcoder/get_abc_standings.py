@@ -32,11 +32,16 @@ async def get_abc_standings(contest_number, db_file):
     if atcoder_name not in user_dict:
       continue
 
+    old_rating = entry.get("OldRating", 0)
+    new_rating = entry.get("NewRating", 0)
     record = {
       "atcoder_name": atcoder_name,
       "discord_name": user_dict[atcoder_name],
       "rank": entry.get("Place", 0),
       "performance": entry.get("Performance", 0),
+      "old_rating": old_rating,
+      "new_rating": new_rating,
+      "rate_change": new_rating - old_rating,
     }
 
     if entry.get("IsRated", False):
