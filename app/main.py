@@ -356,25 +356,29 @@ async def user_unresister(interaction: discord.Interaction, atcoder_name: str):
 ## @param interaction Discordのインタラクション
 @tree.command(name = "user_list", description="登録済みユーザーおよびレートを表示します")
 async def user_list(interaction: discord.Interaction):
-  user = get_user_dict(DB_FILE)
-  if not user:
-    await interaction.response.send_message("登録されているユーザーがいません")
-    return
   await interaction.response.defer()
-  embed = discord.Embed(
-    title = "登録ユーザー",
-    color = 0x3498db,
-    timestamp = interaction.created_at
-  )
-  for atcoder_name, discor_name in user.items():
-    latest_rating = get_latest_rating_from_db(atcoder_name, DB_FILE)
-    atcoder_url = f"https://atcoder.jp/users/{atcoder_name}"
-    embed.add_field(
-      name = f"{get_rate_heart(latest_rating)} {discor_name}",
-      value = f"Atcoder_ID: [{atcoder_name}]({atcoder_url})\n Rating: **{latest_rating}**",
-      inline = False
+  try:
+    user = get_user_dict(DB_FILE)
+    if not user:
+      await interaction.edit_original_response(content="登録されているユーザーがいません")
+      return
+    embed = discord.Embed(
+      title = "登録ユーザー",
+      color = 0x3498db,
+      timestamp = interaction.created_at
     )
-  await interaction.edit_original_response(embed = embed)
+    for atcoder_name, discor_name in user.items():
+      latest_rating = get_latest_rating_from_db(atcoder_name, DB_FILE)
+      atcoder_url = f"https://atcoder.jp/users/{atcoder_name}"
+      embed.add_field(
+        name = f"{get_rate_heart(latest_rating)} {discor_name}",
+        value = f"Atcoder_ID: [{atcoder_name}]({atcoder_url})\n Rating: **{latest_rating}**",
+        inline = False
+      )
+    await interaction.edit_original_response(embed = embed)
+  except Exception as e:
+    print(e)
+    await interaction.edit_original_response(content=f"⚠️ エラーが発生しました。お手数ですが(<@{admin_id}>)までご連絡ください。")
 
 
 ## @brief AC数を主軸にしたランキングを表示するコマンド
