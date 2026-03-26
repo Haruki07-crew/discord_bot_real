@@ -30,17 +30,14 @@ from atcoder.delete_user import delete_user
 from atcoder.get_all_users_with_discord_id import get_all_users_with_discord_id
 from atcoder.is_contest_auto_posted import is_contest_auto_posted
 from atcoder.mark_contest_auto_posted import mark_contest_auto_posted
+from atcoder.get_latest_ended_abc_number import get_latest_ended_abc_number
+from atcoder.is_abc_results_ready import is_abc_results_ready
+from atcoder.get_upcoming_abc_contests import get_upcoming_abc_contests
 
 CONTEST_CACHE_TTL = 3600
 
 async def get_abc_graph_data():
   return None
-
-async def get_latest_ended_abc_number():
-  return None
-
-async def is_abc_results_ready(_contest_number=None):
-  return False
 
 __all__ = [
   "get_latest_rating",
@@ -79,4 +76,7 @@ __all__ = [
   "get_all_users_with_discord_id",
   "is_contest_auto_posted",
   "mark_contest_auto_posted",
+  "get_latest_ended_abc_number",
+  "is_abc_results_ready",
+  "get_upcoming_abc_contests",
 ]

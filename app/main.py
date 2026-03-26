@@ -107,6 +107,31 @@ async def daily_update():
       except Exception as e:
         print(f"[auto_period_ranking] Error posting [{label}]: {e}")
 
+  # 今後のABCコンテストを毎日投稿
+  try:
+    upcoming = await get_upcoming_abc_contests(days=14)
+    if upcoming:
+      embed = discord.Embed(
+        title="📅 今後のABCコンテスト",
+        color=0x1abc9c,
+        timestamp=datetime.datetime.now(JST)
+      )
+      for c in upcoming:
+        start_dt = datetime.datetime.fromtimestamp(c["start_epoch_second"], tz=JST)
+        duration_min = c["duration_second"] // 60
+        embed.add_field(
+          name=c["title"],
+          value=(
+            f"開始: **{start_dt.strftime('%m/%d(%a) %H:%M')} JST**\n"
+            f"時間: {duration_min}分　レート対象: {c.get('rate_change', '?')}"
+          ),
+          inline=False
+        )
+      await channel.send(embed=embed)
+      print("[daily_update] Posted upcoming ABC contests")
+  except Exception as e:
+    print(f"[daily_update] Error posting upcoming contests: {e}")
+
 
 ## @brief 5分ごとにABCの結果が出たか確認し、出ていたら自動でランキングを投稿するタスク
 ## @details kenkoooo contests.json から直近の終了済みABCを特定し、
