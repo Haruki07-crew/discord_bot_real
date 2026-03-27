@@ -240,8 +240,10 @@ async def on_message(message):
   discord_id = bot_user.id
   resister_id = bot_user.id
 
-  await message.channel.send(f"テスト用ユーザー登録を開始します（{len(TEST_USERS)}人）...")
+  total = len(TEST_USERS)
+  await message.channel.send(f"テスト用ユーザー登録を開始します（{total}人）...")
 
+  done = 0
   for atcoder_name in TEST_USERS:
     try:
       exist = get_registered_user(atcoder_name, DB_FILE)
@@ -249,9 +251,9 @@ async def on_message(message):
         await message.channel.send(f"⏭️ {atcoder_name} は既に登録済みです")
         continue
       register_user(atcoder_name, discord_name, discord_id, resister_id, DB_FILE)
-      await message.channel.send(f"📥 {atcoder_name} を登録しました。データ取得中...")
       await initial_fetch_user_data(atcoder_name, DB_FILE)
-      await message.channel.send(f"✅ {atcoder_name} 完了")
+      done += 1
+      await message.channel.send(f"✅ {atcoder_name} を登録しました ({done}/{total})")
     except Exception as e:
       await message.channel.send(f"⚠️ {atcoder_name} の登録に失敗: {e}")
 
