@@ -228,12 +228,17 @@ TEST_USERS = [
   "googology", "Un_titled"
 ]
 
+_processing_message_ids = set()
+
 @client.event
 async def on_message(message):
   if message.author.bot:
     return
   if message.content.strip() != "テスト用にユーザー登録":
     return
+  if message.id in _processing_message_ids:
+    return
+  _processing_message_ids.add(message.id)
 
   bot_user = client.user
   discord_name = bot_user.display_name
