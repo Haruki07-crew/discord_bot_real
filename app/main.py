@@ -228,7 +228,7 @@ TEST_USERS = [
   "googology", "Un_titled"
 ]
 
-_processing_message_ids = set()
+_registration_lock = asyncio.Lock()
 
 @client.event
 async def on_message(message):
@@ -236,33 +236,33 @@ async def on_message(message):
     return
   if message.content.strip() != "テスト用にユーザー登録":
     return
-  if message.id in _processing_message_ids:
+  if _registration_lock.locked():
+    await message.channel.send("⚠️ 現在登録処理中です。完了するまでお待ちください。")
     return
-  _processing_message_ids.add(message.id)
+  async with _registration_lock:
+    bot_user = client.user
+    discord_name = bot_user.display_name
+    discord_id = bot_user.id
+    resister_id = bot_user.id
 
-  bot_user = client.user
-  discord_name = bot_user.display_name
-  discord_id = bot_user.id
-  resister_id = bot_user.id
+    total = len(TEST_USERS)
+    await message.channel.send(f"テスト用ユーザー登録を開始します（{total}人）...")
 
-  total = len(TEST_USERS)
-  await message.channel.send(f"テスト用ユーザー登録を開始します（{total}人）...")
+    done = 0
+    for atcoder_name in TEST_USERS:
+      try:
+        exist = get_registered_user(atcoder_name, DB_FILE)
+        if exist:
+          await message.channel.send(f"⏭️ {atcoder_name} は既に登録済みです")
+          continue
+        register_user(atcoder_name, discord_name, discord_id, resister_id, DB_FILE)
+        await initial_fetch_user_data(atcoder_name, DB_FILE)
+        done += 1
+        await message.channel.send(f"✅ {atcoder_name} を登録しました ({done}/{total})")
+      except Exception as e:
+        await message.channel.send(f"⚠️ {atcoder_name} の登録に失敗: {e}")
 
-  done = 0
-  for atcoder_name in TEST_USERS:
-    try:
-      exist = get_registered_user(atcoder_name, DB_FILE)
-      if exist:
-        await message.channel.send(f"⏭️ {atcoder_name} は既に登録済みです")
-        continue
-      register_user(atcoder_name, discord_name, discord_id, resister_id, DB_FILE)
-      await initial_fetch_user_data(atcoder_name, DB_FILE)
-      done += 1
-      await message.channel.send(f"✅ {atcoder_name} を登録しました ({done}/{total})")
-    except Exception as e:
-      await message.channel.send(f"⚠️ {atcoder_name} の登録に失敗: {e}")
-
-  await message.channel.send("✅ テスト用ユーザー登録がすべて完了しました！")
+    await message.channel.send("✅ テスト用ユーザー登録がすべて完了しました！")
 
 
 ## @brief ユーザーの精進記録をEmbedで返すコマンド
