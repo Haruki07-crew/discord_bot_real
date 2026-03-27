@@ -107,46 +107,12 @@ async def daily_update():
       except Exception as e:
         print(f"[auto_period_ranking] Error posting [{label}]: {e}")
 
-  # 新規の今後ABCコンテストのみ投稿（既に通知済みのものはスキップ）
-  WEEKDAY_JA = ["月", "火", "水", "木", "金", "土", "日"]
-  try:
-    upcoming = await get_upcoming_abc_contests(days=14)
-    new_contests = [
-      c for c in upcoming
-      if not is_contest_auto_posted(f"upcoming_{c['id']}", DB_FILE)
-    ]
-    if new_contests:
-      embed = discord.Embed(
-        title="📅 今後のABCコンテスト",
-        color=0x1abc9c,
-        timestamp=datetime.datetime.now(JST)
-      )
-      for c in new_contests:
-        start_dt = datetime.datetime.fromtimestamp(c["start_epoch_second"], tz=JST)
-        duration_min = c["duration_second"] // 60
-        weekday_ja = WEEKDAY_JA[start_dt.weekday()]
-        date_str = f"{start_dt.strftime('%m/%d')}({weekday_ja}) {start_dt.strftime('%H:%M')}"
-        rate_change = c.get("rate_change", "?")
-        embed.add_field(
-          name=c["title"],
-          value=(
-            f"**{date_str} JST** にレート対象 **{rate_change}** のコンテストがあります\n"
-            f"時間: {duration_min}分"
-          ),
-          inline=False
-        )
-        mark_contest_auto_posted(f"upcoming_{c['id']}", DB_FILE)
-      await channel.send(embed=embed)
-      print(f"[daily_update] Posted {len(new_contests)} new upcoming ABC contests")
-  except Exception as e:
-    print(f"[daily_update] Error posting upcoming contests: {e}")
 
-
-## @brief 5分ごとにABCの結果が出たか確認し、出ていたら自動でランキングを投稿するタスク
-## @details kenkoooo contests.json から直近の終了済みABCを特定し、
-##          AtCoderのresults APIにレーティング更新済みデータが現れたら投稿する。
+## @brief 10分ごとに prev_contest+1 のABC結果を確認し、確定したら自動でランキングを投稿するタスク
+## @details DBに保存した prev_contest の次の番号のコンテスト結果を AtCoder API で確認し、
+##          レーティング更新済みデータが現れたら投稿して prev_contest を更新する。
 ##          RANKING_CHANNEL_ID が未設定の場合はスキップする。
-@tasks.loop(minutes=5)
+@tasks.loop(minutes=10)
 async def auto_abc_ranking():
   now_str = datetime.datetime.now(JST).strftime('%H:%M:%S.%f')[:-3]
   print(f"[{now_str}][auto_abc_ranking] tick")
@@ -156,26 +122,24 @@ async def auto_abc_ranking():
     return
 
   try:
-    contest_number = await get_latest_ended_abc_number()
-    if contest_number is None:
-      print(f"[{now_str}][auto_abc_ranking] No ended ABC contest found, skipping")
+    prev = get_prev_contest(DB_FILE)
+    if prev is None:
+      print(f"[{now_str}][auto_abc_ranking] prev_contest not set, skipping")
       return
 
-    contest_id = f"abc{contest_number:03d}"
-    if is_contest_auto_posted(contest_id, DB_FILE):
-      print(f"[{now_str}][auto_abc_ranking] {contest_id} already posted, skipping")
-      return
+    next_number = prev + 1
+    contest_id = f"abc{next_number:03d}"
 
-    if not await is_abc_results_ready(contest_number):
+    result = await fetch_abc_standings_if_ready(next_number, DB_FILE)
+    if result is None:
       print(f"[{now_str}][auto_abc_ranking] {contest_id} results not ready yet, skipping")
       return
 
-    # 結果確定 → ランキングを投稿
-    print(f"[auto_abc_ranking] Results ready for {contest_id}, posting...")
-    rated, unrated = await get_abc_standings(contest_number, DB_FILE)
+    rated, unrated = result
 
-    # 投稿済みとして記録 (参加者なしでも二重チェックを防ぐ)
-    mark_contest_auto_posted(contest_id, DB_FILE)
+    # 結果確定 → prev_contest を更新（参加者なしでも二重投稿を防ぐ）
+    set_prev_contest(next_number, DB_FILE)
+    print(f"[auto_abc_ranking] Results ready for {contest_id}, posting...")
 
     if not rated and not unrated:
       print(f"[auto_abc_ranking] No registered users participated in {contest_id}")
@@ -187,7 +151,7 @@ async def auto_abc_ranking():
       return
 
     embed = discord.Embed(
-      title=f"🏆 ABC{contest_number:03d} 登録ユーザーランキング",
+      title=f"🏆 ABC{next_number:03d} 登録ユーザーランキング",
       description="コンテスト結果が確定しました！",
       color=0xFFD700,
       timestamp=datetime.datetime.now(JST)
@@ -236,8 +200,23 @@ async def before_auto_abc_ranking():
 async def on_ready():
   init_db(DB_FILE)
   await tree.sync()
-  daily_update.start()
-  auto_abc_ranking.start()
+  if not daily_update.is_running():
+    daily_update.start()
+  if not auto_abc_ranking.is_running():
+    auto_abc_ranking.start()
+  # prev_contest が未設定の場合、APIで直近コンテスト番号を自動取得して初期化
+  if get_prev_contest(DB_FILE) is None:
+    try:
+      number = await get_latest_ended_abc_number()
+      if number is not None:
+        set_prev_contest(number, DB_FILE)
+        print(f"[on_ready] prev_contest initialized to {number} (from API)")
+      else:
+        set_prev_contest(450, DB_FILE)
+        print("[on_ready] prev_contest initialized to 450 (API fallback)")
+    except Exception:
+      set_prev_contest(450, DB_FILE)
+      print("[on_ready] prev_contest initialized to 450 (error fallback)")
   log_channel = client.get_channel(1486382744153100469)
   discord_logger.set_log_channel(log_channel)
   print("activate the bot  now!!!!")

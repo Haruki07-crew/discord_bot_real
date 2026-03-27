@@ -21,6 +21,9 @@ from atcoder.create_progress_graph import create_progress_graph
 from atcoder.get_ac_rate_change_data import get_ac_rate_change_data
 from atcoder.create_ac_rate_graph import create_ac_rate_graph
 from atcoder.get_abc_standings import get_abc_standings
+from atcoder.fetch_abc_standings_if_ready import fetch_abc_standings_if_ready
+from atcoder.get_prev_contest import get_prev_contest
+from atcoder.set_prev_contest import set_prev_contest
 from atcoder.init_db import init_db
 from atcoder.get_user_dict import get_user_dict
 from atcoder.get_registered_user import get_registered_user
@@ -31,8 +34,6 @@ from atcoder.get_all_users_with_discord_id import get_all_users_with_discord_id
 from atcoder.is_contest_auto_posted import is_contest_auto_posted
 from atcoder.mark_contest_auto_posted import mark_contest_auto_posted
 from atcoder.get_latest_ended_abc_number import get_latest_ended_abc_number
-from atcoder.is_abc_results_ready import is_abc_results_ready
-from atcoder.get_upcoming_abc_contests import get_upcoming_abc_contests
 
 CONTEST_CACHE_TTL = 3600
 
@@ -64,9 +65,11 @@ __all__ = [
   "get_ac_rate_change_data",
   "create_ac_rate_graph",
   "get_abc_standings",
+  "fetch_abc_standings_if_ready",
+  "get_prev_contest",
+  "set_prev_contest",
   "get_abc_graph_data",
   "get_latest_ended_abc_number",
-  "is_abc_results_ready",
   "init_db",
   "get_user_dict",
   "get_registered_user",
@@ -76,7 +79,4 @@ __all__ = [
   "get_all_users_with_discord_id",
   "is_contest_auto_posted",
   "mark_contest_auto_posted",
-  "get_latest_ended_abc_number",
-  "is_abc_results_ready",
-  "get_upcoming_abc_contests",
 ]
