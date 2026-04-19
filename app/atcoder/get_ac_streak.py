@@ -3,10 +3,10 @@ from datetime import datetime, timezone, timedelta
 
 
 def get_ac_streak(atcoder_name, db_file):
-  """今日から遡って何日連続でACしているかを返す。"""
+  """昨日から遡って何日連続でACしているかを返す。今日の分は含めない。"""
   JST = timezone(timedelta(hours=9))
   now = datetime.now(JST)
-  today = datetime(now.year, now.month, now.day, tzinfo=JST)
+  yesterday = datetime(now.year, now.month, now.day, tzinfo=JST) - timedelta(days=1)
 
   with sqlite3.connect(db_file) as conn:
     cursor = conn.cursor()
@@ -24,7 +24,7 @@ def get_ac_streak(atcoder_name, db_file):
   ac_dates = set(row[0] for row in rows)
 
   streak = 0
-  check_date = today
+  check_date = yesterday
   while True:
     date_str = check_date.strftime("%Y-%m-%d")
     if date_str in ac_dates:

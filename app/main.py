@@ -613,9 +613,15 @@ async def everyone_state(interaction: discord.Interaction):
       timestamp=interaction.created_at
     )
 
+    user_stats = []
     for atcoder_name, discord_name in user.items():
       ac_count = await get_ac_count(atcoder_name, DB_FILE)
       streak = get_ac_streak(atcoder_name, DB_FILE)
+      user_stats.append((atcoder_name, discord_name, ac_count, streak))
+
+    user_stats.sort(key=lambda x: (x[3], x[2]), reverse=True)
+
+    for atcoder_name, discord_name, ac_count, streak in user_stats:
       streak_text = f"{streak}日連続" if streak > 0 else "0日"
       embed.add_field(
         name=f"{discord_name} ({atcoder_name})",
