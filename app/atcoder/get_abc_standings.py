@@ -38,7 +38,7 @@ async def get_abc_standings(contest_number, db_file):
       "atcoder_name": atcoder_name,
       "discord_name": user_dict[atcoder_name],
       "rank": entry.get("Place", 0),
-      "performance": entry.get("Performance", 0),
+      "performance": max(entry.get("Performance", 0), 0),
       "old_rating": old_rating,
       "new_rating": new_rating,
       "rate_change": new_rating - old_rating,

@@ -32,4 +32,22 @@ def init_progress_tables(db_file):
         submission_last_fetch REAL DEFAULT 0.0
       )
     """)
+    cursor.execute("""
+      CREATE TABLE IF NOT EXISTS weekly_snapshots (
+        cycle_id INTEGER,
+        week_number INTEGER,
+        atcoder_name TEXT,
+        ac_count INTEGER DEFAULT 0,
+        ac_point INTEGER DEFAULT 0,
+        rate_change INTEGER DEFAULT 0,
+        PRIMARY KEY (cycle_id, week_number, atcoder_name)
+      )
+    """)
+    cursor.execute("""
+      CREATE TABLE IF NOT EXISTS weekly_cycle (
+        id INTEGER PRIMARY KEY DEFAULT 1,
+        cycle_id INTEGER DEFAULT 1,
+        current_week INTEGER DEFAULT 0
+      )
+    """)
     conn.commit()

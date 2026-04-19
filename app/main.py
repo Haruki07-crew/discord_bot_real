@@ -24,54 +24,6 @@ DB_FILE = "database.db"
 ## @brief 毎日0時(JST)に全登録ユーザーのデータをAPIから更新するバックグラウンドタスク
 JST = datetime.timezone(datetime.timedelta(hours=9))
 
-## @brief 指定期間のランキング(embed)とAC数/レート変化グラフをチャンネルに投稿する
-## @param channel 投稿先Discordチャンネル
-## @param days 集計期間 (日数)
-## @param label 期間ラベル (例: "1週間")
-## @param filename グラフ画像のファイル名
-async def _post_period_summary(channel, days, label, filename):
-  user = get_user_dict(DB_FILE)
-  if not user:
-    return
-
-  ranking_data = await make_growth_ranking(user, days, DB_FILE)
-  if not ranking_data:
-    return
-
-  embed = discord.Embed(
-    title=f"🏆 Diligence & Growth [{label}]",
-    color=0xFFD700,
-    timestamp=datetime.datetime.now(JST)
-  )
-  for data in ranking_data:
-    rc = data["rate_change"]
-    rc_str = f"+{rc}" if rc >= 0 else str(rc)
-    embed.add_field(
-      name=f"{data['figure']}{data['place']}位 : {data['atcoder_name']}({data['discord_name']})",
-      value=f"Rate: **{rc_str}**　AC数 : **{data['ac']}** AC  点数 : **{data['point']}** 点",
-      inline=False
-    )
-
-  if days <= 7:
-    ac_rate_data = {d["atcoder_name"]: d for d in ranking_data}
-    graph_buf = create_ac_rate_graph(ac_rate_data, label)
-  else:
-    all_user_data = {}
-    for atcoder_name in user:
-      all_user_data[atcoder_name] = await get_progress_data(atcoder_name, days, DB_FILE)
-    graph_buf = create_progress_graph(all_user_data)
-
-  if graph_buf is None:
-    await channel.send(embed=embed)
-    print(f"[auto_period_ranking] Posted [{label}] (no graph)")
-    return
-
-  file = discord.File(graph_buf, filename=filename)
-  embed.set_image(url=f"attachment://{filename}")
-  await channel.send(embed=embed, file=file)
-  print(f"[auto_period_ranking] Posted [{label}]")
-
-
 @tasks.loop(time=datetime.time(hour=1, minute=0, tzinfo=JST))
 async def daily_update():
   print("[daily_update] Starting daily data update...")
@@ -85,34 +37,111 @@ async def daily_update():
     await asyncio.sleep(1.5)
   print("[daily_update] Daily update complete")
 
+
+## @brief 毎週月曜0:15(JST)に週次ランキングと累積グラフを投稿するタスク
+## @details 直近1週間のAC数・点数・レート変化をテキストで表示し、
+##          12週サイクルの累積折れ線グラフ(AC数版・点数版)を投稿する。
+@tasks.loop(time=datetime.time(hour=0, minute=15, tzinfo=JST))
+async def weekly_ranking_post():
+  now = datetime.datetime.now(JST)
+  if now.weekday() != 0:  # 月曜日のみ
+    return
+
+  print("[weekly_ranking_post] Starting weekly post...")
+
   if ranking_channel_id is None:
+    print("[weekly_ranking_post] RANKING_CHANNEL_ID not set, skipping")
     return
   channel = client.get_channel(ranking_channel_id)
   if channel is None:
+    print("[weekly_ranking_post] Channel not found, skipping")
     return
 
-  now = datetime.datetime.now(JST)
-  # (days, label, filename, 投稿するかどうか)
-  periods = [
-    (7,   "1週間", "ranking_weekly.png",  now.weekday() == 0),
-    (30,  "1ヶ月", "ranking_monthly.png", now.day == 1),
-    (90,  "3ヶ月", "ranking_3month.png",  now.day == 1 and now.month in (1, 4, 7, 10)),
-    (180, "半年",  "ranking_6month.png",  now.day == 1 and now.month in (1, 7)),
-    (365, "1年",   "ranking_yearly.png",  now.day == 1 and now.month == 1),
-  ]
-  for days, label, filename, should_post in periods:
-    if should_post:
-      try:
-        await _post_period_summary(channel, days, label, filename)
-      except Exception as e:
-        print(f"[auto_period_ranking] Error posting [{label}]: {e}")
+  try:
+    user = get_user_dict(DB_FILE)
+    if not user:
+      print("[weekly_ranking_post] No registered users, skipping")
+      return
+
+    # 今週のデータを取得 (直近7日)
+    ranking_data = await make_growth_ranking(user, 7, DB_FILE)
+    if not ranking_data:
+      print("[weekly_ranking_post] No ranking data, skipping")
+      return
+
+    # 週次サイクルを進める
+    cycle_id, week_number = advance_weekly_cycle(DB_FILE)
+    print(f"[weekly_ranking_post] cycle={cycle_id}, week={week_number}")
+
+    # スナップショットを保存
+    snapshot_data = [
+      {
+        "atcoder_name": d["atcoder_name"],
+        "ac_count": d["ac"],
+        "ac_point": d["point"],
+        "rate_change": d["rate_change"],
+      }
+      for d in ranking_data
+    ]
+    save_weekly_snapshot(cycle_id, week_number, snapshot_data, DB_FILE)
+
+    # テキスト embed (今週の結果)
+    embed = discord.Embed(
+      title=f"🏆 Diligence & Growth [{week_number}週目]",
+      color=0xFFD700,
+      timestamp=now
+    )
+    for data in ranking_data:
+      rc = data["rate_change"]
+      rc_str = f"+{rc}" if rc >= 0 else str(rc)
+      embed.add_field(
+        name=f"{data['figure']}{data['place']}位 : {data['atcoder_name']}({data['discord_name']})",
+        value=f"Rate: **{rc_str}**　AC数 : **{data['ac']}** AC  点数 : **{data['point']}** 点",
+        inline=False
+      )
+
+    # 累積グラフ用データを取得
+    snapshots = get_weekly_snapshots(cycle_id, DB_FILE)
+
+    # AC数版グラフ
+    graph_ac = create_weekly_graph(snapshots, week_number, x_axis="ac")
+    # 点数版グラフ
+    graph_point = create_weekly_graph(snapshots, week_number, x_axis="point")
+
+    files = []
+    if graph_ac:
+      file_ac = discord.File(graph_ac, filename="weekly_ac.png")
+      files.append(file_ac)
+      embed.set_image(url="attachment://weekly_ac.png")
+
+    await channel.send(embed=embed, files=files if files else discord.utils.MISSING)
+
+    # 点数版は別embedで投稿
+    if graph_point:
+      embed_point = discord.Embed(
+        title=f"📊 累積点数 vs レート変化 [{week_number}週目]",
+        color=0x3498db,
+        timestamp=now
+      )
+      file_point = discord.File(graph_point, filename="weekly_point.png")
+      embed_point.set_image(url="attachment://weekly_point.png")
+      await channel.send(embed=embed_point, file=file_point)
+
+    print(f"[weekly_ranking_post] Posted week {week_number} of cycle {cycle_id}")
+
+  except Exception as e:
+    print(f"[weekly_ranking_post] Error: {e}")
+
+@weekly_ranking_post.before_loop
+async def before_weekly_ranking_post():
+  await client.wait_until_ready()
 
 
-## @brief 10分ごとに prev_contest+1 のABC結果を確認し、確定したら自動でランキングを投稿するタスク
+## @brief 毎日1:05(JST)に prev_contest+1 のABC結果を確認し、確定したら自動でランキングを投稿するタスク
 ## @details DBに保存した prev_contest の次の番号のコンテスト結果を AtCoder API で確認し、
 ##          レーティング更新済みデータが現れたら投稿して prev_contest を更新する。
 ##          RANKING_CHANNEL_ID が未設定の場合はスキップする。
-@tasks.loop(minutes=10)
+@tasks.loop(time=datetime.time(hour=1, minute=5, tzinfo=JST))
 async def auto_abc_ranking():
   now_str = datetime.datetime.now(JST).strftime('%H:%M:%S.%f')[:-3]
   print(f"[{now_str}][auto_abc_ranking] tick")
@@ -191,7 +220,7 @@ async def auto_abc_ranking():
 
 @auto_abc_ranking.before_loop
 async def before_auto_abc_ranking():
-  await asyncio.sleep(300)  # 起動直後の実行を5分遅らせる
+  await client.wait_until_ready()
 
 
 ## @brief Bot起動時のイベントハンドラ
@@ -202,6 +231,8 @@ async def on_ready():
   await tree.sync()
   if not daily_update.is_running():
     daily_update.start()
+  if not weekly_ranking_post.is_running():
+    weekly_ranking_post.start()
   if not auto_abc_ranking.is_running():
     auto_abc_ranking.start()
   # prev_contest が未設定の場合、APIで直近コンテスト番号を自動取得して初期化
@@ -401,63 +432,6 @@ async def user_list(interaction: discord.Interaction):
     await interaction.edit_original_response(content=f"⚠️ エラーが発生しました。お手数ですが(<@{admin_id}>)までご連絡ください。")
 
 
-## @brief AC数を主軸にしたランキングを表示するコマンド
-## @param interaction Discordのインタラクション
-## @param period 比較期間
-@tree.command(name="ac_fight", description="AC数ランキングを表示します")
-@app_commands.choices(period=[
-  app_commands.Choice(name = "1日",  value = 1),
-  app_commands.Choice(name = "1週間", value = 7),
-  app_commands.Choice(name = "1ヶ月", value = 30),
-  app_commands.Choice(name = "3ヶ月", value = 90),
-  app_commands.Choice(name = "半年",  value = 180),
-  app_commands.Choice(name = "1年",  value = 365),
-])
-async def ac_fight(interaction: discord.Interaction, period: app_commands.Choice[int]):
-  await interaction.response.defer()
-  try:
-    user = get_user_dict(DB_FILE)
-    day = period.value
-    label = period.name
-    ranking_data = await make_ranking(user, day, DB_FILE)
-
-    if not ranking_data:
-      await interaction.edit_original_response(content="登録されているユーザーがいません")
-      return
-
-    embed = discord.Embed(
-      title = f"🏆 AC Fight [{label}]🏆",
-      color = 0x2ecc71,
-      timestamp = interaction.created_at
-    )
-    for data in ranking_data:
-      embed.add_field(
-        name = f"{data['figure']}{data['place']}位 : {data['atcoder_name']}({data['discord_name']})",
-        value = f"AC数 : **{data['ac']}** AC  点数 : **{data['point']}** 点",
-        inline = False
-      )
-
-    if day <= 7:
-      rate_data = await get_ac_rate_change_data(user, day, DB_FILE)
-      graph_buf = create_ac_rate_graph(rate_data, label)
-    else:
-      all_user_data = {}
-      for atcoder_name in user:
-        all_user_data[atcoder_name] = await get_progress_data(atcoder_name, day, DB_FILE)
-      graph_buf = create_progress_graph(all_user_data)
-
-    if graph_buf is None:
-      await interaction.edit_original_response(embed=embed)
-      return
-
-    file = discord.File(graph_buf, filename="ac_fight.png")
-    embed.set_image(url="attachment://ac_fight.png")
-    await interaction.edit_original_response(content=None, embed=embed, attachments=[file])
-  except Exception as e:
-    print(e)
-    await interaction.edit_original_response(content=f"⚠️ エラーが発生しました。お手数ですが(<@{admin_id}>)までご連絡ください。")
-
-
 ## @brief レート変化を主軸にしたランキングを表示するコマンド
 ## @details 第1キー: レート変化(降順)、第2キー: AC数(降順) でランキングを生成する
 ## @param interaction Discordのインタラクション
@@ -518,53 +492,84 @@ async def diligence_growth(interaction: discord.Interaction, period: app_command
     await interaction.edit_original_response(content=f"⚠️ エラーが発生しました。お手数ですが(<@{admin_id}>)までご連絡ください。")
 
 
-## @brief Botの使い方をEmbedで表示するコマンド
+## @brief 点数を主軸にしたランキングを表示するコマンド (diligence_growthの点数版)
+## @details 第1キー: レート変化(降順)、第2キー: 点数(降順) でランキングを生成する
 ## @param interaction Discordのインタラクション
-@tree.command(name="user_guide", description="このBotの使い方を表示します")
-async def user_guide(interaction: discord.Interaction):
-  embed = discord.Embed(
-    title="📖 Bot 使い方ガイド",
-    description="AtCoder精進管理Botのコマンド一覧です",
-    color=0x3498db,
-    timestamp=interaction.created_at
-  )
-  embed.add_field(
-    name="👤 ユーザー管理",
-    value=(
-      "`/user_resister [atcoder_name] [discord_user]`\n"
-      "　AtCoderユーザーをBotに登録します\n\n"
-      "`/user_unresister [atcoder_name]`\n"
-      "　登録を解除します (登録者本人のみ)\n\n"
-      "`/user_list`\n"
-      "　登録ユーザーとレートの一覧を表示します"
-    ),
-    inline=False
-  )
-  embed.add_field(
-    name="📊 精進記録",
-    value=(
-      "`/syozin [atcoder_name]`\n"
-      "　指定ユーザーの今日のAC数・獲得点数・通算AC数を表示します\n\n"
-      "`/ac_fight [period]`\n"
-      "　AC数ランキングを表示します\n"
-      "　期間: 1日 / 1週間(散布図) / 1ヶ月 / 3ヶ月 / 半年 / 1年(レートグラフ)\n\n"
-      "`/diligence_growth [period]`\n"
-      "　レート変化を主軸にしたランキング＋グラフを表示します\n"
-      "　期間: 1日 / 1週間(散布図) / 1ヶ月 / 3ヶ月 / 半年 / 1年(レートグラフ)"
-    ),
-    inline=False
-  )
-  embed.add_field(
-    name="🏆 コンテスト",
-    value=(
-      "`/abc_ranking [contest_number]`\n"
-      "　指定したABCコンテストの登録ユーザーランキングを表示します\n"
-      "　例: `/abc_ranking 450` → ABC450のランキング"
-    ),
-    inline=False
-  )
-  embed.set_footer(text="データは毎日0時に自動更新されます")
-  await interaction.response.send_message(embed=embed)
+## @param period 比較期間
+@tree.command(name="diligence_growth_point", description="レート変化と点数のランキングを表示します")
+@app_commands.choices(period=[
+  app_commands.Choice(name = "1日",  value = 1),
+  app_commands.Choice(name = "1週間", value = 7),
+  app_commands.Choice(name = "1ヶ月", value = 30),
+  app_commands.Choice(name = "3ヶ月", value = 90),
+  app_commands.Choice(name = "半年",  value = 180),
+  app_commands.Choice(name = "1年",  value = 365),
+])
+async def diligence_growth_point(interaction: discord.Interaction, period: app_commands.Choice[int]):
+  await interaction.response.defer()
+  try:
+    user = get_user_dict(DB_FILE)
+    day = period.value
+    label = period.name
+    ranking_data = await make_growth_ranking(user, day, DB_FILE)
+
+    if not ranking_data:
+      await interaction.edit_original_response(content="登録されているユーザーがいません")
+      return
+
+    # 点数でソートし直す (第1キー: レート変化, 第2キー: 点数)
+    sorted_data = sorted(ranking_data, key=lambda x: (x["rate_change"], x["point"]), reverse=True)
+    prev_rc, prev_pt = None, None
+    cur_place = 0
+    for i, d in enumerate(sorted_data):
+      if d["rate_change"] != prev_rc or d["point"] != prev_pt:
+        cur_place = i + 1
+      if cur_place == 1:
+        d["figure"] = " 🥇 "
+      elif cur_place == 2:
+        d["figure"] = " 🥈 "
+      elif cur_place == 3:
+        d["figure"] = " 🥉 "
+      else:
+        d["figure"] = " 👤 "
+      d["place"] = cur_place
+      prev_rc = d["rate_change"]
+      prev_pt = d["point"]
+
+    embed = discord.Embed(
+      title = f"🏆 Diligence & Growth [点数] [{label}]🏆",
+      color = 0x2ecc71,
+      timestamp = interaction.created_at
+    )
+    for data in sorted_data:
+      rc = data["rate_change"]
+      rc_str = f"+{rc}" if rc >= 0 else str(rc)
+      embed.add_field(
+        name = f"{data['figure']}{data['place']}位 : {data['atcoder_name']}({data['discord_name']})",
+        value = f"Rate: **{rc_str}**　点数 : **{data['point']}** 点  AC数 : **{data['ac']}** AC",
+        inline = False
+      )
+
+    if day <= 7:
+      # 散布図 (横軸: 点数, 縦軸: レート変化)
+      point_rate_data = {d["atcoder_name"]: {"ac": d["point"], "rate_change": d["rate_change"]} for d in sorted_data}
+      graph_buf = create_ac_rate_graph(point_rate_data, f"{label} (点数)")
+    else:
+      all_user_data = {}
+      for atcoder_name in user:
+        all_user_data[atcoder_name] = await get_progress_data(atcoder_name, day, DB_FILE)
+      graph_buf = create_progress_graph(all_user_data)
+
+    if graph_buf is None:
+      await interaction.edit_original_response(embed=embed)
+      return
+
+    file = discord.File(graph_buf, filename="point_rate.png")
+    embed.set_image(url="attachment://point_rate.png")
+    await interaction.edit_original_response(content=None, embed=embed, attachments=[file])
+  except Exception as e:
+    print(e)
+    await interaction.edit_original_response(content=f"⚠️ エラーが発生しました。お手数ですが(<@{admin_id}>)までご連絡ください。")
 
 
 ## @brief 指定したABCコンテストの登録ユーザーランキングを表示するコマンド
