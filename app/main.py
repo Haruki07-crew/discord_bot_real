@@ -137,11 +137,11 @@ async def before_weekly_ranking_post():
   await client.wait_until_ready()
 
 
-## @brief 毎日1:05(JST)に prev_contest+1 のABC結果を確認し、確定したら自動でランキングを投稿するタスク
+## @brief 1時間ごとに prev_contest+1 のABC結果を確認し、確定したら自動でランキングを投稿するタスク
 ## @details DBに保存した prev_contest の次の番号のコンテスト結果を AtCoder API で確認し、
 ##          レーティング更新済みデータが現れたら投稿して prev_contest を更新する。
 ##          RANKING_CHANNEL_ID が未設定の場合はスキップする。
-@tasks.loop(time=datetime.time(hour=1, minute=5, tzinfo=JST))
+@tasks.loop(hours=1)
 async def auto_abc_ranking():
   now_str = datetime.datetime.now(JST).strftime('%H:%M:%S.%f')[:-3]
   print(f"[{now_str}][auto_abc_ranking] tick")
@@ -243,10 +243,10 @@ async def on_ready():
         set_prev_contest(number, DB_FILE)
         print(f"[on_ready] prev_contest initialized to {number} (from API)")
       else:
-        set_prev_contest(455, DB_FILE)
+        set_prev_contest(454, DB_FILE)
         print("[on_ready] prev_contest initialized to 450 (API fallback)")
     except Exception:
-      set_prev_contest(455, DB_FILE)
+      set_prev_contest(454, DB_FILE)
       print("[on_ready] prev_contest initialized to 450 (error fallback)")
   log_channel = client.get_channel(1486382744153100469)
   discord_logger.set_log_channel(log_channel)
