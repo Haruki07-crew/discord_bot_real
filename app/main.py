@@ -196,14 +196,14 @@ async def auto_abc_ranking():
       rc_str = f"+{rc}" if rc >= 0 else str(rc)
       embed.add_field(
         name=f"{figure} {place}位 : {d['atcoder_name']}({d['discord_name']})",
-        value=f"Rank: **{d['rank']}** 位　Perf: **{d['performance']}**　Rate: **{rc_str}** ({d['old_rating']} → {d['new_rating']})",
+        value=f"Rank: **{d['rank']}** 位　AC: **{d.get('ac_count', 0)}** 問　Perf: **{d['performance']}**　Rate: **{rc_str}** ({d['old_rating']} → {d['new_rating']})",
         inline=False
       )
       prev_rank = d["rank"]
 
     if unrated:
       unrated_lines = [
-        f"{d['atcoder_name']}({d['discord_name']})  {d['rank']}位"
+        f"{d['atcoder_name']}({d['discord_name']})  {d['rank']}位  AC: {d.get('ac_count', 0)}問"
         for d in unrated
       ]
       embed.add_field(
@@ -243,57 +243,83 @@ async def on_ready():
         set_prev_contest(number, DB_FILE)
         print(f"[on_ready] prev_contest initialized to {number} (from API)")
       else:
-        set_prev_contest(450, DB_FILE)
+        set_prev_contest(455, DB_FILE)
         print("[on_ready] prev_contest initialized to 450 (API fallback)")
     except Exception:
-      set_prev_contest(450, DB_FILE)
+      set_prev_contest(455, DB_FILE)
       print("[on_ready] prev_contest initialized to 450 (error fallback)")
   log_channel = client.get_channel(1486382744153100469)
   discord_logger.set_log_channel(log_channel)
   print("activate the bot  now!!!!")
 
 
-TEST_USERS = [
-  "hanaosi", "yuukougun", "bandai0412", "ponkura", "sky7",
-  "KawataAki", "misuke3779", "yudai17", "asyogo", "mrkm1627",
-  "googology", "Un_titled"
-]
+TEST_USERS = {
+  "hanaosi": "東原遙希",
+  "yuukougun": "後藤勇輝",
+  "mrkm1627": "村上功一",
+  "asyogo": "赤澤翔悟",
+  "Kanata0724": "中井奏汰",
+  "kmiarrbxy": "鎌田瑞生",
+  "ponkura": "伊戸寛哲",
+  "yudai17": "山口雄大",
+  "misuke3779": "石川涼介",
+  "sky7": "宮武幸斗",
+  "KawataAki": "川田晃弘",
+}
+
+OTHER_KOSEN_USERS = {
+  "bandai0412": "バンダイ君",
+  "googology": "googologyくん",
+  "Un_titled": "アンタイトルド",
+  "yuukougun": "yuukougun",
+  "hanaosi": "hanaosi",
+  "mrkm1627": "mrkm1627",
+  "Cafe_j19419": "Cafe_j19419",
+  "Not_Leonian": "Not_Leonian",
+  "yiwiy9": "yiwiy9",
+}
 
 _registration_lock = asyncio.Lock()
 
-@client.event
-async def on_message(message):
-  if message.author.bot:
-    return
-  if message.content.strip() != "テスト用にユーザー登録":
+async def _bulk_register(message, user_dict):
+  """指定されたユーザー辞書を一括登録する共通処理"""
+  if str(message.author.id) != str(admin_id):
     return
   if _registration_lock.locked():
     await message.channel.send("⚠️ 現在登録処理中です。完了するまでお待ちください。")
     return
   async with _registration_lock:
-    bot_user = client.user
-    discord_name = bot_user.display_name
-    discord_id = bot_user.id
-    resister_id = bot_user.id
+    register_id = message.author.id
+    discord_id = message.author.id
 
-    total = len(TEST_USERS)
-    await message.channel.send(f"テスト用ユーザー登録を開始します（{total}人）...")
+    total = len(user_dict)
+    await message.channel.send(f"ユーザー登録を開始します（{total}人）...")
 
     done = 0
-    for atcoder_name in TEST_USERS:
+    for atcoder_name, discord_name in user_dict.items():
       try:
         exist = get_registered_user(atcoder_name, DB_FILE)
         if exist:
-          await message.channel.send(f"⏭️ {atcoder_name} は既に登録済みです")
+          await message.channel.send(f"⏭️ {atcoder_name}({discord_name}) は既に登録済みです")
           continue
-        register_user(atcoder_name, discord_name, discord_id, resister_id, DB_FILE)
+        register_user(atcoder_name, discord_name, discord_id, register_id, DB_FILE)
         await initial_fetch_user_data(atcoder_name, DB_FILE)
         done += 1
-        await message.channel.send(f"✅ {atcoder_name} を登録しました ({done}/{total})")
+        await message.channel.send(f"✅ {atcoder_name}({discord_name}) を登録しました ({done}/{total})")
       except Exception as e:
         await message.channel.send(f"⚠️ {atcoder_name} の登録に失敗: {e}")
 
-    await message.channel.send("✅ テスト用ユーザー登録がすべて完了しました！")
+    await message.channel.send("✅ ユーザー登録がすべて完了しました！")
+
+@client.event
+async def on_message(message):
+  if message.author.bot:
+    return
+  text = message.content.strip()
+  if text == "テスト用にユーザー登録":
+    await _bulk_register(message, TEST_USERS)
+  elif text == "他高専テスト用に登録":
+    await _bulk_register(message, OTHER_KOSEN_USERS)
 
 
 ## @brief ユーザーの精進記録をEmbedで返すコマンド
@@ -340,17 +366,15 @@ async def rating_command(interaction: discord.Interaction, atcoder_name: str):
 
 ## @brief ユーザーをDBに登録するコマンド
 ## @details AtCoderの存在確認後にDBへ登録する。既登録の場合はエラーを返す。
-##          discord_userにはDiscordユーザーをメンションで指定する。
 ## @param interaction Discordのインタラクション
 ## @param atcoder_name 登録するAtCoderユーザー名
-## @param discord_user 登録するDiscordユーザー (メンション選択)
-@tree.command(name = "user_resister", description="ユーザーを登録します")
-async def user_resister(interaction: discord.Interaction, atcoder_name: str, discord_user: discord.Member):
+## @param discord_name 登録するDiscordユーザー名 (手動入力)
+@tree.command(name = "user_register", description="ユーザーを登録します")
+async def user_register(interaction: discord.Interaction, atcoder_name: str, discord_name: str):
   await interaction.response.defer()
   try:
-    resister_id = interaction.user.id
-    discord_name = discord_user.display_name
-    discord_id = discord_user.id
+    register_id = interaction.user.id
+    discord_id = interaction.user.id
 
     exist_user = get_registered_user(atcoder_name, DB_FILE)
     if exist_user:
@@ -360,7 +384,7 @@ async def user_resister(interaction: discord.Interaction, atcoder_name: str, dis
     if "存在しません" in str(check):
       await interaction.followup.send(f"⚠️エラー : {atcoder_name}は存在しません")
       return
-    register_user(atcoder_name, discord_name, discord_id, resister_id, DB_FILE)
+    register_user(atcoder_name, discord_name, discord_id, register_id, DB_FILE)
     await interaction.followup.send(
       f"{discord_name} さんを {atcoder_name} で登録しました\n"
       f"提出履歴を取得中です...（提出数が多い場合は数分かかります）"
@@ -373,7 +397,7 @@ async def user_resister(interaction: discord.Interaction, atcoder_name: str, dis
     await interaction.followup.send(content=f"⚠️ エラーが発生しました。お手数ですが(<@{admin_id}>)までご連絡ください。")
 
 
-## @brief user_unresister の atcoder_name オートコンプリート (登録済みユーザー一覧)
+## @brief user_unregister の atcoder_name オートコンプリート (登録済みユーザー一覧)
 async def registered_atcoder_autocomplete(interaction: discord.Interaction, current: str):
   users = get_user_dict(DB_FILE)
   return [
@@ -387,16 +411,16 @@ async def registered_atcoder_autocomplete(interaction: discord.Interaction, curr
 ## @details 登録者本人またはadminのみ解除可能
 ## @param interaction Discordのインタラクション
 ## @param atcoder_name 登録解除するAtCoderユーザー名
-@tree.command(name = "user_unresister", description="登録されているユーザーの登録を解除します")
+@tree.command(name = "user_unregister", description="登録されているユーザーの登録を解除します")
 @app_commands.autocomplete(atcoder_name=registered_atcoder_autocomplete)
-async def user_unresister(interaction: discord.Interaction, atcoder_name: str):
+async def user_unregister(interaction: discord.Interaction, atcoder_name: str):
   await interaction.response.defer()
   user_id = interaction.user.id
-  resister_id = get_resister_id(atcoder_name, DB_FILE)
-  if resister_id is None:
+  register_id = get_register_id(atcoder_name, DB_FILE)
+  if register_id is None:
     await interaction.followup.send(f"{atcoder_name}さんは登録されていません")
     return
-  if user_id == resister_id or user_id == int(admin_id):
+  if user_id == register_id or user_id == int(admin_id):
     delete_user(atcoder_name, DB_FILE)
     await interaction.followup.send(f"{atcoder_name}さんの登録を解除しました")
   else:
@@ -572,6 +596,39 @@ async def diligence_growth_point(interaction: discord.Interaction, period: app_c
     await interaction.edit_original_response(content=f"⚠️ エラーが発生しました。お手数ですが(<@{admin_id}>)までご連絡ください。")
 
 
+## @brief 全登録ユーザーの現在のAC数と連続AC日数を表示するコマンド
+## @param interaction Discordのインタラクション
+@tree.command(name="everyone_state", description="全員の総AC数と連続AC日数を表示します")
+async def everyone_state(interaction: discord.Interaction):
+  await interaction.response.defer()
+  try:
+    user = get_user_dict(DB_FILE)
+    if not user:
+      await interaction.edit_original_response(content="登録されているユーザーがいません")
+      return
+
+    embed = discord.Embed(
+      title="全員の精進状況",
+      color=0x3498db,
+      timestamp=interaction.created_at
+    )
+
+    for atcoder_name, discord_name in user.items():
+      ac_count = await get_ac_count(atcoder_name, DB_FILE)
+      streak = get_ac_streak(atcoder_name, DB_FILE)
+      streak_text = f"{streak}日連続" if streak > 0 else "0日"
+      embed.add_field(
+        name=f"{discord_name} ({atcoder_name})",
+        value=f"総AC数: **{ac_count}** AC　連続AC: **{streak_text}**",
+        inline=False
+      )
+
+    await interaction.edit_original_response(embed=embed)
+  except Exception as e:
+    print(e)
+    await interaction.edit_original_response(content=f"⚠️ エラーが発生しました。お手数ですが(<@{admin_id}>)までご連絡ください。")
+
+
 ## @brief 指定したABCコンテストの登録ユーザーランキングを表示するコマンド
 ## @details AtCoderのstandings APIを1回叩き、登録ユーザーをratedとunratedに分類して表示する。
 ##          0問の場合は参加なしとみなし除外する。unrated参加者はランキング外に別途表示する。
@@ -616,14 +673,14 @@ async def abc_ranking(interaction: discord.Interaction, contest_number: int):
       rc_str = f"+{rc}" if rc >= 0 else str(rc)
       embed.add_field(
         name=f"{figure} {place}位 : {d['atcoder_name']}({d['discord_name']})",
-        value=f"Rank: **{d['rank']}** 位　Perf: **{d['performance']}**　Rate: **{rc_str}** ({d['old_rating']} → {d['new_rating']})",
+        value=f"Rank: **{d['rank']}** 位　AC: **{d.get('ac_count', 0)}** 問　Perf: **{d['performance']}**　Rate: **{rc_str}** ({d['old_rating']} → {d['new_rating']})",
         inline=False
       )
       prev_rank = d["rank"]
 
     if unrated:
       unrated_lines = [
-        f"{d['atcoder_name']}({d['discord_name']})  {d['rank']}位"
+        f"{d['atcoder_name']}({d['discord_name']})  {d['rank']}位  AC: {d.get('ac_count', 0)}問"
         for d in unrated
       ]
       embed.add_field(

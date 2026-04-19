@@ -10,7 +10,7 @@ def init_db(db_file):
         atcoder_name TEXT PRIMARY KEY,
         discord_name TEXT,
         discord_id INTEGER,
-        resister_id INTEGER
+        register_id INTEGER
       )
     """)
     try:

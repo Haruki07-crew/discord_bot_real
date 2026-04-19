@@ -26,7 +26,7 @@ from atcoder.init_db import init_db
 from atcoder.get_user_dict import get_user_dict
 from atcoder.get_registered_user import get_registered_user
 from atcoder.register_user import register_user
-from atcoder.get_resister_id import get_resister_id
+from atcoder.get_register_id import get_register_id
 from atcoder.delete_user import delete_user
 from atcoder.get_all_users_with_discord_id import get_all_users_with_discord_id
 from atcoder.is_contest_auto_posted import is_contest_auto_posted
@@ -34,6 +34,9 @@ from atcoder.mark_contest_auto_posted import mark_contest_auto_posted
 from atcoder.get_latest_ended_abc_number import get_latest_ended_abc_number
 from atcoder.weekly_cycle_helpers import get_weekly_cycle_state, advance_weekly_cycle, save_weekly_snapshot, get_weekly_snapshots
 from atcoder.create_weekly_graph import create_weekly_graph
+from atcoder.get_contest_ac_count import get_contest_ac_count
+from atcoder.get_contest_end_time import get_contest_end_time_unix
+from atcoder.get_ac_streak import get_ac_streak
 
 CONTEST_CACHE_TTL = 3600
 
@@ -72,7 +75,7 @@ __all__ = [
   "get_user_dict",
   "get_registered_user",
   "register_user",
-  "get_resister_id",
+  "get_register_id",
   "delete_user",
   "get_all_users_with_discord_id",
   "is_contest_auto_posted",
@@ -82,4 +85,7 @@ __all__ = [
   "save_weekly_snapshot",
   "get_weekly_snapshots",
   "create_weekly_graph",
+  "get_contest_ac_count",
+  "get_contest_end_time_unix",
+  "get_ac_streak",
 ]

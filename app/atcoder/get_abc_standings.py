@@ -1,6 +1,8 @@
 import aiohttp
 import sqlite3
 import discord_logger
+from atcoder.get_contest_ac_count import get_contest_ac_count
+from atcoder.get_contest_end_time import get_contest_end_time_unix
 
 async def get_abc_standings(contest_number, db_file):
   contest_id = f"abc{contest_number:03d}"
@@ -24,6 +26,8 @@ async def get_abc_standings(contest_number, db_file):
   if not user_dict:
     return [], []
 
+  end_time_unix = get_contest_end_time_unix(contest_number, db_file)
+
   rated = []
   unrated = []
 
@@ -34,6 +38,11 @@ async def get_abc_standings(contest_number, db_file):
 
     old_rating = entry.get("OldRating", 0)
     new_rating = entry.get("NewRating", 0)
+
+    ac_count = 0
+    if end_time_unix is not None:
+      ac_count = get_contest_ac_count(atcoder_name, contest_number, end_time_unix, db_file)
+
     record = {
       "atcoder_name": atcoder_name,
       "discord_name": user_dict[atcoder_name],
@@ -42,6 +51,7 @@ async def get_abc_standings(contest_number, db_file):
       "old_rating": old_rating,
       "new_rating": new_rating,
       "rate_change": new_rating - old_rating,
+      "ac_count": ac_count,
     }
 
     if entry.get("IsRated", False):
