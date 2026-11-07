@@ -175,8 +175,32 @@ async def daily_update():
 ## @brief 毎週月曜0:15(JST)に週次ランキングと累積グラフを投稿するタスク
 ## @details 直近1週間のAC数・点数・レート変化をテキストで表示し、
 ##          12週サイクルの累積折れ線グラフ(AC数版・点数版)を投稿する。
-@tasks.loop(time=datetime.time(hour=0, minute=15, tzinfo=JST))
+WEEKLY_POST_TIME = datetime.time(hour=0, minute=15, tzinfo=JST)
+_weekly_lock = asyncio.Lock()
+_catch_up_task = None
+
+@tasks.loop(time=WEEKLY_POST_TIME)
 async def weekly_ranking_post():
+  # 定時実行と起動時の取りこぼし投稿が同時に走っても二重投稿しないようにする
+  async with _weekly_lock:
+    await _post_weekly_ranking()
+
+
+## @brief 月曜0:15に再起動などでBotが止まっていても、その日のうちに起動すれば週次投稿を行う
+## @details tasks.loop(time=...) は止まっていた間の実行を後から行わないため、そのままだと1週分が丸ごと抜ける。
+##          投稿済みかどうかは weekly_last_posted で判定するので、投稿済みなら何もしない。
+async def catch_up_weekly_ranking_post():
+  now = datetime.datetime.now(JST)
+  if now.weekday() != 0 or now.time() < WEEKLY_POST_TIME.replace(tzinfo=None):
+    return
+  if get_weekly_last_posted(DB_FILE) == now.strftime("%Y-%m-%d"):
+    return
+  print("[weekly_ranking_post] Missed scheduled post, posting now")
+  async with _weekly_lock:
+    await _post_weekly_ranking()
+
+
+async def _post_weekly_ranking():
   now = datetime.datetime.now(JST)
   if now.weekday() != 0:  # 月曜日のみ
     return
@@ -387,9 +411,13 @@ async def on_ready():
     weekly_ranking_post.start()
   if not auto_abc_ranking.is_running():
     auto_abc_ranking.start()
-  await ensure_prev_contest()
   if log_channel_id is not None:
     discord_logger.set_log_channel(client.get_channel(log_channel_id))
+  await ensure_prev_contest()
+  # 全員分のデータ更新を伴うので、on_ready を止めないよう別タスクで実行する
+  global _catch_up_task
+  if _catch_up_task is None or _catch_up_task.done():
+    _catch_up_task = asyncio.create_task(catch_up_weekly_ranking_post())
   print("activate the bot  now!!!!")
 
 
