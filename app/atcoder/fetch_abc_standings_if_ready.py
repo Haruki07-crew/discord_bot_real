@@ -35,4 +35,15 @@ async def fetch_abc_standings_if_ready(contest_number, db_file):
     if end_dt is None or time.time() - end_dt.timestamp() < 24 * 60 * 60:
       return None
 
-  return await build_abc_standings(data, contest_number, db_file)
+  rated, unrated = await build_abc_standings(data, contest_number, db_file)
+
+  # kenkoooo はコンテストの提出を遅れて取り込むことがあり、取り込み前だと全員のAC数が0になる。
+  # 一度投稿すると次のコンテストへ進んでしまうので、全員0なら終了から48時間までは待って再試行する。
+  participants = rated + unrated
+  if participants and all(d["ac_count"] == 0 for d in participants):
+    end_dt = parse_atcoder_time(data[0].get("EndTime"))
+    if end_dt is not None and time.time() - end_dt.timestamp() < 48 * 60 * 60:
+      print(f"[fetch_abc_standings_if_ready] {contest_id}: kenkoooo にまだ提出が無いため待機")
+      return None
+
+  return rated, unrated

@@ -9,6 +9,7 @@ import config as config
 from atcoder import *
 import asyncio
 import datetime
+import re
 import time
 from server import server_thread
 import discord_logger
@@ -120,6 +121,15 @@ async def send_with_retry(make_coro, attempts=3, delay=60):
       await asyncio.sleep(delay)
 
 
+## @brief AtCoderのユーザー名として正しい形式か (英数字と_で3〜16文字)
+## @details "x/../.." や "name?a" のような文字列がURLに入ると、別のページが200を返して
+##          存在確認をすり抜け、不正な名前や既存ユーザーの二重登録が起きるため、APIを叩く前に弾く
+ATCODER_NAME_RE = re.compile(r"[A-Za-z0-9_]{3,16}")
+
+def is_valid_atcoder_name(name):
+  return ATCODER_NAME_RE.fullmatch(name) is not None
+
+
 def format_rate_change(rc):
   return f"+{rc}" if rc >= 0 else str(rc)
 
@@ -228,12 +238,18 @@ async def _post_weekly_ranking():
 
     # daily_update(1:00)より前に走るので、先にキャッシュを更新する
     # (しないと日曜日のACがどの週にも集計されない)
-    await refresh_users_data(list(user), DB_FILE)
+    # レートは終了から遅れて確定するため、コンテスト履歴はキャッシュを使わず取り直す
+    # (取り直さないと、日曜深夜に確定したレート変化がどの週にも入らない)
+    await refresh_users_data(list(user), DB_FILE, force_contest=True)
+    user = get_user_dict(DB_FILE)  # 更新中に登録解除されたユーザーを除く
+    if not user:
+      return
 
     # 先週分のデータを取得 (先週月曜0:00 〜 今週月曜0:00)。
     # 終わりを今日の0:00で区切り、0:00〜0:15のACが2週に二重計上されないようにする
     week_end_unix = int(datetime.datetime(now.year, now.month, now.day, tzinfo=JST).timestamp())
-    ranking_data = await make_growth_ranking(user, 7, DB_FILE, end_unix=week_end_unix)
+    # 期間は「今日を含めて N 日分」なので、今日の0:00で切って先週の7日分にするには 8 を渡す
+    ranking_data = await make_growth_ranking(user, 8, DB_FILE, end_unix=week_end_unix)
     if not ranking_data:
       print("[weekly_ranking_post] No ranking data, skipping")
       return
@@ -499,6 +515,9 @@ async def rating_command(interaction: discord.Interaction, atcoder_name: str):
   await interaction.response.defer()
   try:
     # 登録済みユーザーならキャッシュを差分更新してから集計する (しないと今日のACが反映されない)
+    if not is_valid_atcoder_name(atcoder_name):
+      await interaction.edit_original_response(content=f"⚠️エラー : {atcoder_name}は存在しません")
+      return
     registered = {name.lower(): name for name in get_user_dict(DB_FILE)}
     if atcoder_name.lower() in registered:
       atcoder_name = registered[atcoder_name.lower()]  # キャッシュは登録時の表記で保存されている
@@ -553,6 +572,9 @@ async def user_register(interaction: discord.Interaction, atcoder_name: str, dis
     register_id = interaction.user.id
     discord_id = interaction.user.id
 
+    if not is_valid_atcoder_name(atcoder_name):
+      await interaction.followup.send(f"⚠️エラー : {atcoder_name}は存在しません")
+      return
     exist_user = get_registered_user(atcoder_name, DB_FILE)
     if exist_user:
       await interaction.followup.send(f"⚠️エラー: {atcoder_name} さんはすでに<@{exist_user[1]}>さんによって登録されています")
@@ -563,6 +585,12 @@ async def user_register(interaction: discord.Interaction, atcoder_name: str, dis
       return
     if exists is None:
       await interaction.followup.send(f"⚠️エラー : AtCoderに接続できませんでした。時間をおいて再度お試しください")
+      return
+    # 存在確認を待っている間に同じユーザーが登録されていないか確認し直す
+    # (ここから INSERT までは await を挟まないので、同時に実行されても二重登録にならない)
+    exist_user = get_registered_user(atcoder_name, DB_FILE)
+    if exist_user:
+      await interaction.followup.send(f"⚠️エラー: {atcoder_name} さんはすでに<@{exist_user[1]}>さんによって登録されています")
       return
     register_user(atcoder_name, discord_name, discord_id, register_id, DB_FILE)
     await interaction.followup.send(
@@ -755,6 +783,8 @@ async def everyone_state(interaction: discord.Interaction):
     if not user:
       await interaction.edit_original_response(content="登録されているユーザーがいません")
       return
+    # daily_update(1:00)前だと昨夜のACが未反映で、連続AC日数が途切れて表示されるため先に更新する
+    await refresh_users_data(list(user), DB_FILE)
 
     user_stats = []
     for atcoder_name, discord_name in user.items():

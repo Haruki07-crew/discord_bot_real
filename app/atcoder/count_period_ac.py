@@ -7,13 +7,11 @@ import discord_logger
 
 def get_period_start_unix(day):
   """集計期間の開始時刻(Unix秒)を返す。AC数・レート変化・グラフで同じ期間を使うための共通関数。
-  day == 1 なら今日の0:00(JST)、それ以外は今日の0:00からday日前。"""
+  今日を含めて day 日分 (day == 1 なら今日の0:00(JST)、7 なら6日前の0:00)。"""
   time_difference = timezone(timedelta(hours=9))
   now = datetime.now(time_difference)
   today_start = datetime(now.year, now.month, now.day, tzinfo=time_difference)
-  if day == 1:
-    return int(today_start.timestamp())
-  return int((today_start - timedelta(days=day)).timestamp())
+  return int((today_start - timedelta(days=max(day, 1) - 1)).timestamp())
 
 
 async def count_period_ac(atcoder_name, day, db_file="database.db", end_unix=None):
