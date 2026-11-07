@@ -13,11 +13,8 @@ def create_ac_rate_graph(user_data, label, x_label="AC数"):
   fig.patch.set_facecolor('white')
   ax.set_facecolor('#f8f9fa')
 
-  colors = [
-    '#e74c3c', '#3498db', '#2ecc71', '#f39c12',
-    '#9b59b6', '#1abc9c', '#e67e22', '#34495e',
-    '#e91e63', '#00bcd4'
-  ]
+  # 登録者が10人を超えても色が重ならないよう、週次グラフと同じ20色のパレットを使う
+  from atcoder.create_weekly_graph import COLORS as colors
 
   for i, (name, d) in enumerate(user_data.items()):
     ac = d["ac"]

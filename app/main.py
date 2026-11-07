@@ -237,7 +237,8 @@ async def weekly_ranking_post():
     )
 
     # 累積グラフ用データを取得
-    snapshots = get_weekly_snapshots(cycle_id, DB_FILE)
+    # 登録解除されたユーザーの線がグラフに残らないよう、現在の登録者だけに絞る
+    snapshots = {name: weeks for name, weeks in get_weekly_snapshots(cycle_id, DB_FILE).items() if name in user}
 
     # AC数版グラフ
     graph_ac = create_weekly_graph(snapshots, week_number, x_axis="ac")
@@ -474,6 +475,10 @@ async def rating_command(interaction: discord.Interaction, atcoder_name: str):
     if atcoder_name.lower() in registered:
       atcoder_name = registered[atcoder_name.lower()]  # キャッシュは登録時の表記で保存されている
       await refresh_users_data([atcoder_name], DB_FILE)
+    elif await atcoder_user_exists(atcoder_name) is False:
+      # 未登録ユーザーは kenkoooo から直接取るが、存在しない名前だと 0 AC と表示されてしまうので先に確認する
+      await interaction.edit_original_response(content=f"⚠️エラー : {atcoder_name}は存在しません")
+      return
     ac_sum = await get_ac_count(atcoder_name, DB_FILE)
     ac_daily = await count_period_ac(atcoder_name, 1, DB_FILE)
     problems_url = f"https://kenkoooo.com/atcoder/#/user/{atcoder_name}?userPageTab=Progress+Charts"

@@ -25,12 +25,13 @@ async def count_period_ac(atcoder_name, day, db_file="database.db", end_unix=Non
   with sqlite3.connect(db_file) as conn:
     cursor = conn.cursor()
     cursor.execute(
-      "SELECT submission_last_id FROM update_bookmark WHERE atcoder_name = ?",
+      "SELECT submission_last_id, submission_last_fetch FROM update_bookmark WHERE atcoder_name = ?",
       (atcoder_name,)
     )
     meta = cursor.fetchone()
 
-  if meta is not None and meta[0] and meta[0] > 0:
+  # 一度でも提出の取得に成功していればキャッシュを使う (提出0件のユーザーも含む)
+  if meta is not None and ((meta[0] and meta[0] > 0) or (meta[1] and meta[1] > 0)):
     with sqlite3.connect(db_file) as conn:
       cursor = conn.cursor()
       cursor.execute("""
