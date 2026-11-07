@@ -16,8 +16,11 @@ def get_period_start_unix(day):
   return int((today_start - timedelta(days=day)).timestamp())
 
 
-async def count_period_ac(atcoder_name, day, db_file="database.db"):
+async def count_period_ac(atcoder_name, day, db_file="database.db", end_unix=None):
+  """期間内のユニークAC数と点数合計を [ac_count, point_sum] で返す。
+  end_unix を指定するとその時刻より前の提出だけを数える (週次集計で週をまたいで二重に数えないため)。"""
   period_start_unix = get_period_start_unix(day)
+  period_end_unix = end_unix if end_unix is not None else 2**62
 
   with sqlite3.connect(db_file) as conn:
     cursor = conn.cursor()
@@ -32,9 +35,9 @@ async def count_period_ac(atcoder_name, day, db_file="database.db"):
       cursor = conn.cursor()
       cursor.execute("""
         SELECT problem_id, MAX(point) FROM ac_submissions_cache
-        WHERE atcoder_name = ? AND epoch_second >= ?
+        WHERE atcoder_name = ? AND epoch_second >= ? AND epoch_second < ?
         GROUP BY problem_id
-      """, (atcoder_name, period_start_unix))
+      """, (atcoder_name, period_start_unix, period_end_unix))
       rows = cursor.fetchall()
     ac_count = len(rows)
     ac_point_sum = sum(point or 0 for _, point in rows)
@@ -60,6 +63,8 @@ async def count_period_ac(atcoder_name, day, db_file="database.db"):
       if not isinstance(data, list) or not data:
         break
       for submission in data:
+        if submission["epoch_second"] >= period_end_unix:
+          continue
         if submission["result"] == "AC":
           problem_id = submission["problem_id"]
           if "ahc" not in problem_id and problem_id not in s:

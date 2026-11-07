@@ -7,6 +7,11 @@ import discord_logger
 
 JST = timezone(timedelta(hours=9))
 
+# kenkoooo はコンテスト終了後に提出をまとめて取り込むなど、時刻順に取り込まれるとは限らない。
+# 最終提出時刻ちょうどから取得すると後から取り込まれた古い提出を取りこぼすので、
+# 少し巻き戻して取得する (重複は INSERT OR IGNORE で除外される)。
+REFETCH_MARGIN_SEC = 24 * 60 * 60
+
 async def fetch_and_cache_ac_submissions(atcoder_name, db_file):
   now = time.time()
 
@@ -47,7 +52,7 @@ async def fetch_and_cache_ac_submissions(atcoder_name, db_file):
   # from_second は「その秒を含む」ため直前の最終提出が再取得されるが、INSERT OR IGNORE で重複排除される。
   new_submissions = []
   last_submission_id = from_id
-  last_epoch_second = from_epoch
+  last_epoch_second = max(0, from_epoch - REFETCH_MARGIN_SEC) if from_epoch > 0 else 0
   fetch_ok = False
   timeout = aiohttp.ClientTimeout(total=30, connect=10, sock_read=20)
   async with aiohttp.ClientSession() as session:
@@ -95,7 +100,7 @@ async def fetch_and_cache_ac_submissions(atcoder_name, db_file):
         (atcoder_name, submission_id, problem_id, epoch_second, point)
         VALUES (?, ?, ?, ?, ?)
       """, new_submissions)
-    if last_submission_id and last_submission_id != from_id:
+    if last_submission_id and last_submission_id != from_id and last_epoch_second > from_epoch:
       cursor.execute("""
         UPDATE update_bookmark
         SET submission_last_id = ?, submission_cache_from = ?

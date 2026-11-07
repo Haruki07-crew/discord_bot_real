@@ -1,4 +1,6 @@
 import aiohttp
+import time
+from atcoder.parse_atcoder_time import parse_atcoder_time
 import discord_logger
 from atcoder.build_abc_standings import build_abc_standings
 
@@ -27,6 +29,10 @@ async def fetch_abc_standings_if_ready(contest_number, db_file):
 
   rated_entries = [e for e in data if e.get("IsRated", False)]
   if not any(e.get("NewRating", 0) > 0 for e in rated_entries):
-    return None
+    # コンテストが unrated になった場合はレートが確定しないので、終了から24時間経っていれば確定扱いにする
+    # (そうしないと以降のABCの自動投稿が全て止まる)
+    end_dt = parse_atcoder_time(data[0].get("EndTime"))
+    if end_dt is None or time.time() - end_dt.timestamp() < 24 * 60 * 60:
+      return None
 
   return await build_abc_standings(data, contest_number, db_file)

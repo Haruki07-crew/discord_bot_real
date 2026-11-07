@@ -9,6 +9,7 @@ import config as config
 from atcoder import *
 import asyncio
 import datetime
+import time
 from server import server_thread
 import discord_logger
 
@@ -31,6 +32,11 @@ JST = datetime.timezone(datetime.timedelta(hours=9))
 EMBED_MAX_FIELDS = 25
 EMBED_MAX_CHARS = 5500  # 上限6000文字に余裕を持たせる
 FIELD_VALUE_MAX = 1024
+FIELD_NAME_MAX = 256  # タイトルも同じく256文字
+
+
+def _truncate(text, limit):
+  return text if len(text) <= limit else text[:limit - 1] + "…"
 
 
 ## @brief フィールドのリストを上限に収まるよう複数のEmbedに分割して作成する
@@ -40,7 +46,11 @@ def build_embeds(title, color, timestamp, fields, description=None):
   embeds = []
   cur = None
   cur_len = 0
+  title = _truncate(title, FIELD_NAME_MAX - 6)  # "(続き)" を付けても256文字以内
   for name, value in fields:
+    # discord_name は /user_register で自由入力されるため、長すぎる名前で送信が失敗しないよう切り詰める
+    name = _truncate(name, FIELD_NAME_MAX)
+    value = _truncate(value, FIELD_VALUE_MAX)
     field_len = len(name) + len(value)
     if cur is None or len(cur.fields) >= EMBED_MAX_FIELDS or cur_len + field_len > EMBED_MAX_CHARS:
       is_first = not embeds
@@ -95,6 +105,19 @@ async def send_embeds_to_interaction(interaction, embeds, file=None, image_name=
     await interaction.edit_original_response(content=None, embed=embeds[0])
   for e in embeds[1:]:
     await interaction.followup.send(embed=e)
+
+
+## @brief 送信処理を最大 attempts 回まで再試行する (一時的なDiscord障害で自動投稿が失われないように)
+## @param make_coro 呼ぶたびに新しい送信コルーチンを返す関数 (discord.File は1度しか送れないので毎回作り直す)
+async def send_with_retry(make_coro, attempts=3, delay=60):
+  for i in range(attempts):
+    try:
+      return await make_coro()
+    except Exception as e:
+      print(f"[send_with_retry] attempt {i + 1}/{attempts} failed: {e}")
+      if i == attempts - 1:
+        raise
+      await asyncio.sleep(delay)
 
 
 def format_rate_change(rc):
@@ -183,8 +206,10 @@ async def weekly_ranking_post():
     # (しないと日曜日のACがどの週にも集計されない)
     await refresh_users_data(list(user), DB_FILE)
 
-    # 今週のデータを取得 (直近7日)
-    ranking_data = await make_growth_ranking(user, 7, DB_FILE)
+    # 先週分のデータを取得 (先週月曜0:00 〜 今週月曜0:00)。
+    # 終わりを今日の0:00で区切り、0:00〜0:15のACが2週に二重計上されないようにする
+    week_end_unix = int(datetime.datetime(now.year, now.month, now.day, tzinfo=JST).timestamp())
+    ranking_data = await make_growth_ranking(user, 7, DB_FILE, end_unix=week_end_unix)
     if not ranking_data:
       print("[weekly_ranking_post] No ranking data, skipping")
       return
@@ -219,8 +244,13 @@ async def weekly_ranking_post():
     # 点数版グラフ
     graph_point = create_weekly_graph(snapshots, week_number, x_axis="point")
 
-    file_ac = discord.File(graph_ac, filename="weekly_ac.png") if graph_ac else None
-    await send_embeds_to_channel(channel, embeds, file_ac, "weekly_ac.png")
+    def make_ac_post():
+      file_ac = None
+      if graph_ac:
+        graph_ac.seek(0)
+        file_ac = discord.File(graph_ac, filename="weekly_ac.png")
+      return send_embeds_to_channel(channel, embeds, file_ac, "weekly_ac.png")
+    await send_with_retry(make_ac_post)
 
     # 点数版は別embedで投稿
     if graph_point:
@@ -229,9 +259,11 @@ async def weekly_ranking_post():
         color=0x3498db,
         timestamp=now
       )
-      file_point = discord.File(graph_point, filename="weekly_point.png")
       embed_point.set_image(url="attachment://weekly_point.png")
-      await channel.send(embed=embed_point, file=file_point)
+      def make_point_post():
+        graph_point.seek(0)
+        return channel.send(embed=embed_point, file=discord.File(graph_point, filename="weekly_point.png"))
+      await send_with_retry(make_point_post)
 
     print(f"[weekly_ranking_post] Posted week {week_number} of cycle {cycle_id}")
 
@@ -252,12 +284,16 @@ async def ensure_prev_contest():
   if prev is not None:
     return prev
   try:
-    number = await get_latest_ended_abc_number()
+    latest = await get_latest_ended_abc_number(with_end_time=True)
   except Exception as e:
     print(f"[ensure_prev_contest] Error: {e}")
     return None
-  if number is None:
+  if latest is None:
     return None
+  number, end_unix = latest
+  # 終了から24時間以内ならまだレート未確定の可能性があるので、そのABCも自動投稿の対象に含める
+  if time.time() - end_unix < 24 * 60 * 60:
+    number -= 1
   set_prev_contest(number, DB_FILE)
   print(f"[ensure_prev_contest] prev_contest initialized to {number} (from API)")
   return number
@@ -267,6 +303,9 @@ async def ensure_prev_contest():
 ## @details DBに保存した prev_contest の次の番号のコンテスト結果を AtCoder API で確認し、
 ##          レーティング更新済みデータが現れたら投稿して prev_contest を更新する。
 ##          RANKING_CHANNEL_ID が未設定の場合はスキップする。
+ABC_POST_MAX_FAILURES = 3
+_abc_post_failures = {}  # contest_number -> 送信失敗回数
+
 @tasks.loop(hours=1)
 async def auto_abc_ranking():
   now_str = datetime.datetime.now(JST).strftime('%H:%M:%S.%f')[:-3]
@@ -312,7 +351,17 @@ async def auto_abc_ranking():
       abc_ranking_fields(rated, unrated),
       description="コンテスト結果が確定しました！"
     )
-    await send_embeds_to_channel(channel, embeds)
+    try:
+      await send_embeds_to_channel(channel, embeds)
+    except Exception as e:
+      # 送信に失敗したら次のtickで再試行する。ただし失敗し続けると以降のABCが全て止まるので、
+      # ABC_POST_MAX_FAILURES 回失敗したら諦めて次のコンテストへ進める
+      _abc_post_failures[next_number] = _abc_post_failures.get(next_number, 0) + 1
+      print(f"[auto_abc_ranking] Failed to post {contest_id} ({_abc_post_failures[next_number]}/{ABC_POST_MAX_FAILURES}): {e}")
+      if _abc_post_failures[next_number] >= ABC_POST_MAX_FAILURES:
+        set_prev_contest(next_number, DB_FILE)
+        print(f"[auto_abc_ranking] Gave up posting {contest_id}")
+      return
     # 投稿に成功してから prev_contest を進める (送信失敗時に投稿が失われないように)
     set_prev_contest(next_number, DB_FILE)
     print(f"[auto_abc_ranking] Posted {contest_id} ranking")
@@ -421,7 +470,9 @@ async def rating_command(interaction: discord.Interaction, atcoder_name: str):
   await interaction.response.defer()
   try:
     # 登録済みユーザーならキャッシュを差分更新してから集計する (しないと今日のACが反映されない)
-    if atcoder_name in get_user_dict(DB_FILE):
+    registered = {name.lower(): name for name in get_user_dict(DB_FILE)}
+    if atcoder_name.lower() in registered:
+      atcoder_name = registered[atcoder_name.lower()]  # キャッシュは登録時の表記で保存されている
       await refresh_users_data([atcoder_name], DB_FILE)
     ac_sum = await get_ac_count(atcoder_name, DB_FILE)
     ac_daily = await count_period_ac(atcoder_name, 1, DB_FILE)
