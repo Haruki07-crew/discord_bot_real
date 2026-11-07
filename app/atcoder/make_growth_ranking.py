@@ -2,7 +2,7 @@ async def make_growth_ranking(user_name_dict, day, db_file="database.db", end_un
   from atcoder.AC_fight import AC_fight
   from atcoder.get_ac_rate_change_data import get_ac_rate_change_data
   ac_list = await AC_fight(user_name_dict, day, db_file, end_unix)
-  rate_data = await get_ac_rate_change_data(user_name_dict, day, db_file)
+  rate_data = await get_ac_rate_change_data(user_name_dict, day, db_file, end_unix)
 
   merged = []
   for entry in ac_list:
