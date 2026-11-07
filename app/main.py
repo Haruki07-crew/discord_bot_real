@@ -18,11 +18,128 @@ tree = app_commands.CommandTree(client)
 
 admin_id = config.ADMIN_ID
 ranking_channel_id = int(config.RANKING_CHANNEL_ID) if config.RANKING_CHANNEL_ID else None
+log_channel_id = int(config.LOG_CHANNEL_ID) if config.LOG_CHANNEL_ID else None
 DB_FILE = "database.db"
 
 
-## @brief 毎日0時(JST)に全登録ユーザーのデータをAPIから更新するバックグラウンドタスク
 JST = datetime.timezone(datetime.timedelta(hours=9))
+
+
+# ---- Embed 作成ヘルパー ----
+# Discord の Embed はフィールド25個・合計6000文字・フィールド値1024文字が上限で、
+# 超えると送信自体が失敗する。登録ユーザーが増えても壊れないように分割して送る。
+EMBED_MAX_FIELDS = 25
+EMBED_MAX_CHARS = 5500  # 上限6000文字に余裕を持たせる
+FIELD_VALUE_MAX = 1024
+
+
+## @brief フィールドのリストを上限に収まるよう複数のEmbedに分割して作成する
+## @param fields [(name, value), ...]
+## @return [discord.Embed, ...] (fieldsが空でも1つは返す)
+def build_embeds(title, color, timestamp, fields, description=None):
+  embeds = []
+  cur = None
+  cur_len = 0
+  for name, value in fields:
+    field_len = len(name) + len(value)
+    if cur is None or len(cur.fields) >= EMBED_MAX_FIELDS or cur_len + field_len > EMBED_MAX_CHARS:
+      is_first = not embeds
+      cur = discord.Embed(
+        title=title if is_first else f"{title} (続き)",
+        description=description if is_first else None,
+        color=color,
+        timestamp=timestamp
+      )
+      embeds.append(cur)
+      cur_len = len(cur.title) + len(cur.description or "")
+    cur.add_field(name=name, value=value, inline=False)
+    cur_len += field_len
+  if not embeds:
+    embeds.append(discord.Embed(title=title, description=description, color=color, timestamp=timestamp))
+  return embeds
+
+
+## @brief 複数行のテキストを、1フィールドの値が1024文字以内になるよう複数フィールドに分ける
+def lines_to_fields(name, lines):
+  fields = []
+  chunk = []
+  chunk_len = 0
+  for line in lines:
+    if chunk and chunk_len + len(line) + 1 > FIELD_VALUE_MAX:
+      fields.append((name if not fields else f"{name} (続き)", "\n".join(chunk)))
+      chunk, chunk_len = [], 0
+    chunk.append(line[:FIELD_VALUE_MAX])
+    chunk_len += len(line) + 1
+  if chunk:
+    fields.append((name if not fields else f"{name} (続き)", "\n".join(chunk)))
+  return fields
+
+
+## @brief Embedのリストをチャンネルに送る。1通目に添付ファイル(グラフ)を付け、残りは別メッセージで送る
+async def send_embeds_to_channel(channel, embeds, file=None, image_name=None):
+  if file is not None:
+    embeds[0].set_image(url=f"attachment://{image_name}")
+    await channel.send(embed=embeds[0], file=file)
+  else:
+    await channel.send(embed=embeds[0])
+  for e in embeds[1:]:
+    await channel.send(embed=e)
+
+
+## @brief Embedのリストでdefer済みインタラクションに応答する。2通目以降はfollowupで送る
+async def send_embeds_to_interaction(interaction, embeds, file=None, image_name=None):
+  if file is not None:
+    embeds[0].set_image(url=f"attachment://{image_name}")
+    await interaction.edit_original_response(content=None, embed=embeds[0], attachments=[file])
+  else:
+    await interaction.edit_original_response(content=None, embed=embeds[0])
+  for e in embeds[1:]:
+    await interaction.followup.send(embed=e)
+
+
+def format_rate_change(rc):
+  return f"+{rc}" if rc >= 0 else str(rc)
+
+
+## @brief Diligence & Growth ランキングのフィールドを作る
+## @param point_first True なら点数を先に表示する (diligence_growth_point 用)
+def growth_fields(ranking_data, point_first=False):
+  fields = []
+  for data in ranking_data:
+    rc_str = format_rate_change(data["rate_change"])
+    if point_first:
+      value = f"Rate: **{rc_str}**　点数 : **{data['point']}** 点  AC数 : **{data['ac']}** AC"
+    else:
+      value = f"Rate: **{rc_str}**　AC数 : **{data['ac']}** AC  点数 : **{data['point']}** 点"
+    fields.append((f"{data['figure']}{data['place']}位 : {data['atcoder_name']}({data['discord_name']})", value))
+  return fields
+
+
+## @brief ABCランキング (rated + unrated) のフィールドを作る
+def abc_ranking_fields(rated, unrated):
+  fields = []
+  prev_rank = -1
+  place = 0
+  for i, d in enumerate(rated):
+    if d["rank"] != prev_rank:
+      place = i + 1
+    figure = "🥇" if place == 1 else "🥈" if place == 2 else "🥉" if place == 3 else "👤"
+    rc_str = format_rate_change(d.get("rate_change", 0))
+    fields.append((
+      f"{figure} {place}位 : {d['atcoder_name']}({d['discord_name']})",
+      f"Rank: **{d['rank']}** 位　AC: **{d.get('ac_count', 0)}** 問　Perf: **{d['performance']}**　Rate: **{rc_str}** ({d['old_rating']} → {d['new_rating']})"
+    ))
+    prev_rank = d["rank"]
+  if unrated:
+    unrated_lines = [
+      f"{d['atcoder_name']}({d['discord_name']})  {d['rank']}位  AC: {d.get('ac_count', 0)}問"
+      for d in unrated
+    ]
+    fields.extend(lines_to_fields("📋 Unrated参加者", unrated_lines))
+  return fields
+
+
+## @brief 毎日1時(JST)に全登録ユーザーのデータをAPIから更新するバックグラウンドタスク
 
 @tasks.loop(time=datetime.time(hour=1, minute=0, tzinfo=JST))
 async def daily_update():
@@ -90,19 +207,9 @@ async def weekly_ranking_post():
     save_weekly_snapshot(cycle_id, week_number, snapshot_data, DB_FILE)
 
     # テキスト embed (今週の結果)
-    embed = discord.Embed(
-      title=f"🏆 Diligence & Growth [{week_number}週目]",
-      color=0xFFD700,
-      timestamp=now
+    embeds = build_embeds(
+      f"🏆 Diligence & Growth [{week_number}週目]", 0xFFD700, now, growth_fields(ranking_data)
     )
-    for data in ranking_data:
-      rc = data["rate_change"]
-      rc_str = f"+{rc}" if rc >= 0 else str(rc)
-      embed.add_field(
-        name=f"{data['figure']}{data['place']}位 : {data['atcoder_name']}({data['discord_name']})",
-        value=f"Rate: **{rc_str}**　AC数 : **{data['ac']}** AC  点数 : **{data['point']}** 点",
-        inline=False
-      )
 
     # 累積グラフ用データを取得
     snapshots = get_weekly_snapshots(cycle_id, DB_FILE)
@@ -112,13 +219,8 @@ async def weekly_ranking_post():
     # 点数版グラフ
     graph_point = create_weekly_graph(snapshots, week_number, x_axis="point")
 
-    files = []
-    if graph_ac:
-      file_ac = discord.File(graph_ac, filename="weekly_ac.png")
-      files.append(file_ac)
-      embed.set_image(url="attachment://weekly_ac.png")
-
-    await channel.send(embed=embed, files=files if files else discord.utils.MISSING)
+    file_ac = discord.File(graph_ac, filename="weekly_ac.png") if graph_ac else None
+    await send_embeds_to_channel(channel, embeds, file_ac, "weekly_ac.png")
 
     # 点数版は別embedで投稿
     if graph_point:
@@ -141,6 +243,26 @@ async def before_weekly_ranking_post():
   await client.wait_until_ready()
 
 
+## @brief prev_contest が未設定なら、直近に終了したABC番号をAPIから取得して初期化する
+## @details 固定値で初期化すると、古いABCのランキングが1時間に1つずつ連投されてしまうため、
+##          API取得に失敗した場合は初期化せず None を返し、次回の auto_abc_ranking で再試行する。
+## @return 現在の prev_contest (取得できなければ None)
+async def ensure_prev_contest():
+  prev = get_prev_contest(DB_FILE)
+  if prev is not None:
+    return prev
+  try:
+    number = await get_latest_ended_abc_number()
+  except Exception as e:
+    print(f"[ensure_prev_contest] Error: {e}")
+    return None
+  if number is None:
+    return None
+  set_prev_contest(number, DB_FILE)
+  print(f"[ensure_prev_contest] prev_contest initialized to {number} (from API)")
+  return number
+
+
 ## @brief 1時間ごとに prev_contest+1 のABC結果を確認し、確定したら自動でランキングを投稿するタスク
 ## @details DBに保存した prev_contest の次の番号のコンテスト結果を AtCoder API で確認し、
 ##          レーティング更新済みデータが現れたら投稿して prev_contest を更新する。
@@ -155,9 +277,9 @@ async def auto_abc_ranking():
     return
 
   try:
-    prev = get_prev_contest(DB_FILE)
+    prev = await ensure_prev_contest()
     if prev is None:
-      print(f"[{now_str}][auto_abc_ranking] prev_contest not set, skipping")
+      print(f"[{now_str}][auto_abc_ranking] prev_contest not set (API unavailable), retry next tick")
       return
 
     next_number = prev + 1
@@ -169,54 +291,30 @@ async def auto_abc_ranking():
       return
 
     rated, unrated = result
-
-    # 結果確定 → prev_contest を更新（参加者なしでも二重投稿を防ぐ）
-    set_prev_contest(next_number, DB_FILE)
     print(f"[auto_abc_ranking] Results ready for {contest_id}, posting...")
 
     if not rated and not unrated:
+      # 参加者なし → 投稿するものが無いので次のコンテストへ進める
+      set_prev_contest(next_number, DB_FILE)
       print(f"[auto_abc_ranking] No registered users participated in {contest_id}")
       return
 
     channel = client.get_channel(ranking_channel_id)
     if channel is None:
+      # prev_contest は進めず、次回のtickで再試行する
       print(f"[auto_abc_ranking] Channel {ranking_channel_id} not found")
       return
 
-    embed = discord.Embed(
-      title=f"🏆 ABC{next_number:03d} 登録ユーザーランキング",
-      description="コンテスト結果が確定しました！",
-      color=0xFFD700,
-      timestamp=datetime.datetime.now(JST)
+    embeds = build_embeds(
+      f"🏆 ABC{next_number:03d} 登録ユーザーランキング",
+      0xFFD700,
+      datetime.datetime.now(JST),
+      abc_ranking_fields(rated, unrated),
+      description="コンテスト結果が確定しました！"
     )
-
-    prev_rank = -1
-    place = 0
-    for i, d in enumerate(rated):
-      if d["rank"] != prev_rank:
-        place = i + 1
-      figure = "🥇" if place == 1 else "🥈" if place == 2 else "🥉" if place == 3 else "👤"
-      rc = d.get("rate_change", 0)
-      rc_str = f"+{rc}" if rc >= 0 else str(rc)
-      embed.add_field(
-        name=f"{figure} {place}位 : {d['atcoder_name']}({d['discord_name']})",
-        value=f"Rank: **{d['rank']}** 位　AC: **{d.get('ac_count', 0)}** 問　Perf: **{d['performance']}**　Rate: **{rc_str}** ({d['old_rating']} → {d['new_rating']})",
-        inline=False
-      )
-      prev_rank = d["rank"]
-
-    if unrated:
-      unrated_lines = [
-        f"{d['atcoder_name']}({d['discord_name']})  {d['rank']}位  AC: {d.get('ac_count', 0)}問"
-        for d in unrated
-      ]
-      embed.add_field(
-        name="📋 Unrated参加者",
-        value="\n".join(unrated_lines),
-        inline=False
-      )
-
-    await channel.send(embed=embed)
+    await send_embeds_to_channel(channel, embeds)
+    # 投稿に成功してから prev_contest を進める (送信失敗時に投稿が失われないように)
+    set_prev_contest(next_number, DB_FILE)
     print(f"[auto_abc_ranking] Posted {contest_id} ranking")
 
   except Exception as e:
@@ -239,21 +337,9 @@ async def on_ready():
     weekly_ranking_post.start()
   if not auto_abc_ranking.is_running():
     auto_abc_ranking.start()
-  # prev_contest が未設定の場合、APIで直近コンテスト番号を自動取得して初期化
-  if get_prev_contest(DB_FILE) is None:
-    try:
-      number = await get_latest_ended_abc_number()
-      if number is not None:
-        set_prev_contest(number, DB_FILE)
-        print(f"[on_ready] prev_contest initialized to {number} (from API)")
-      else:
-        set_prev_contest(454, DB_FILE)
-        print("[on_ready] prev_contest initialized to 450 (API fallback)")
-    except Exception:
-      set_prev_contest(454, DB_FILE)
-      print("[on_ready] prev_contest initialized to 450 (error fallback)")
-  log_channel = client.get_channel(1486382744153100469)
-  discord_logger.set_log_channel(log_channel)
+  await ensure_prev_contest()
+  if log_channel_id is not None:
+    discord_logger.set_log_channel(client.get_channel(log_channel_id))
   print("activate the bot  now!!!!")
 
 
@@ -430,7 +516,7 @@ async def user_unregister(interaction: discord.Interaction, atcoder_name: str):
   if register_id is None:
     await interaction.followup.send(f"{atcoder_name}さんは登録されていません")
     return
-  if user_id == register_id or user_id == int(admin_id):
+  if user_id == register_id or str(user_id) == str(admin_id):
     delete_user(atcoder_name, DB_FILE)
     await interaction.followup.send(f"{atcoder_name}さんの登録を解除しました")
   else:
@@ -447,20 +533,16 @@ async def user_list(interaction: discord.Interaction):
     if not user:
       await interaction.edit_original_response(content="登録されているユーザーがいません")
       return
-    embed = discord.Embed(
-      title = "登録ユーザー",
-      color = 0x3498db,
-      timestamp = interaction.created_at
-    )
-    for atcoder_name, discor_name in user.items():
+    fields = []
+    for atcoder_name, discord_name in user.items():
       latest_rating = get_latest_rating_from_db(atcoder_name, DB_FILE)
       atcoder_url = f"https://atcoder.jp/users/{atcoder_name}"
-      embed.add_field(
-        name = f"{get_rate_heart(latest_rating)} {discor_name}",
-        value = f"Atcoder_ID: [{atcoder_name}]({atcoder_url})\n Rating: **{latest_rating}**",
-        inline = False
-      )
-    await interaction.edit_original_response(embed = embed)
+      fields.append((
+        f"{get_rate_heart(latest_rating)} {discord_name}",
+        f"Atcoder_ID: [{atcoder_name}]({atcoder_url})\n Rating: **{latest_rating}**"
+      ))
+    embeds = build_embeds("登録ユーザー", 0x3498db, interaction.created_at, fields)
+    await send_embeds_to_interaction(interaction, embeds)
   except Exception as e:
     print(e)
     await interaction.edit_original_response(content=f"⚠️ エラーが発生しました。お手数ですが(<@{admin_id}>)までご連絡ください。")
@@ -492,19 +574,9 @@ async def diligence_growth(interaction: discord.Interaction, period: app_command
       await interaction.edit_original_response(content="登録されているユーザーがいません")
       return
 
-    embed = discord.Embed(
-      title = f"🏆 Diligence & Growth [{label}]🏆",
-      color = 0xFFD700,
-      timestamp = interaction.created_at
+    embeds = build_embeds(
+      f"🏆 Diligence & Growth [{label}]🏆", 0xFFD700, interaction.created_at, growth_fields(ranking_data)
     )
-    for data in ranking_data:
-      rc = data["rate_change"]
-      rc_str = f"+{rc}" if rc >= 0 else str(rc)
-      embed.add_field(
-        name = f"{data['figure']}{data['place']}位 : {data['atcoder_name']}({data['discord_name']})",
-        value = f"Rate: **{rc_str}**　AC数 : **{data['ac']}** AC  点数 : **{data['point']}** 点",
-        inline = False
-      )
 
     if day <= 7:
       ac_rate_data = {d["atcoder_name"]: d for d in ranking_data}
@@ -515,13 +587,8 @@ async def diligence_growth(interaction: discord.Interaction, period: app_command
         all_user_data[atcoder_name] = await get_progress_data(atcoder_name, day, DB_FILE)
       graph_buf = create_progress_graph(all_user_data)
 
-    if graph_buf is None:
-      await interaction.edit_original_response(embed=embed)
-      return
-
-    file = discord.File(graph_buf, filename="ac_rate.png")
-    embed.set_image(url="attachment://ac_rate.png")
-    await interaction.edit_original_response(content=None, embed=embed, attachments=[file])
+    file = discord.File(graph_buf, filename="ac_rate.png") if graph_buf is not None else None
+    await send_embeds_to_interaction(interaction, embeds, file, "ac_rate.png")
   except Exception as e:
     print(e)
     await interaction.edit_original_response(content=f"⚠️ エラーが発生しました。お手数ですが(<@{admin_id}>)までご連絡ください。")
@@ -572,37 +639,23 @@ async def diligence_growth_point(interaction: discord.Interaction, period: app_c
       prev_rc = d["rate_change"]
       prev_pt = d["point"]
 
-    embed = discord.Embed(
-      title = f"🏆 Diligence & Growth [点数] [{label}]🏆",
-      color = 0x2ecc71,
-      timestamp = interaction.created_at
+    embeds = build_embeds(
+      f"🏆 Diligence & Growth [点数] [{label}]🏆", 0x2ecc71, interaction.created_at,
+      growth_fields(sorted_data, point_first=True)
     )
-    for data in sorted_data:
-      rc = data["rate_change"]
-      rc_str = f"+{rc}" if rc >= 0 else str(rc)
-      embed.add_field(
-        name = f"{data['figure']}{data['place']}位 : {data['atcoder_name']}({data['discord_name']})",
-        value = f"Rate: **{rc_str}**　点数 : **{data['point']}** 点  AC数 : **{data['ac']}** AC",
-        inline = False
-      )
 
     if day <= 7:
       # 散布図 (横軸: 点数, 縦軸: レート変化)
       point_rate_data = {d["atcoder_name"]: {"ac": d["point"], "rate_change": d["rate_change"]} for d in sorted_data}
-      graph_buf = create_ac_rate_graph(point_rate_data, f"{label} (点数)")
+      graph_buf = create_ac_rate_graph(point_rate_data, label, x_label="点数")
     else:
       all_user_data = {}
       for atcoder_name in user:
-        all_user_data[atcoder_name] = await get_progress_data(atcoder_name, day, DB_FILE)
-      graph_buf = create_progress_graph(all_user_data)
+        all_user_data[atcoder_name] = await get_progress_data(atcoder_name, day, DB_FILE, x_axis="point")
+      graph_buf = create_progress_graph(all_user_data, x_label="点数")
 
-    if graph_buf is None:
-      await interaction.edit_original_response(embed=embed)
-      return
-
-    file = discord.File(graph_buf, filename="point_rate.png")
-    embed.set_image(url="attachment://point_rate.png")
-    await interaction.edit_original_response(content=None, embed=embed, attachments=[file])
+    file = discord.File(graph_buf, filename="point_rate.png") if graph_buf is not None else None
+    await send_embeds_to_interaction(interaction, embeds, file, "point_rate.png")
   except Exception as e:
     print(e)
     await interaction.edit_original_response(content=f"⚠️ エラーが発生しました。お手数ですが(<@{admin_id}>)までご連絡ください。")
@@ -619,12 +672,6 @@ async def everyone_state(interaction: discord.Interaction):
       await interaction.edit_original_response(content="登録されているユーザーがいません")
       return
 
-    embed = discord.Embed(
-      title="全員の精進状況",
-      color=0x3498db,
-      timestamp=interaction.created_at
-    )
-
     user_stats = []
     for atcoder_name, discord_name in user.items():
       ac_count = await get_ac_count(atcoder_name, DB_FILE)
@@ -633,15 +680,16 @@ async def everyone_state(interaction: discord.Interaction):
 
     user_stats.sort(key=lambda x: (x[3], x[2]), reverse=True)
 
+    fields = []
     for atcoder_name, discord_name, ac_count, streak in user_stats:
       streak_text = f"{streak}日連続" if streak > 0 else "0日"
-      embed.add_field(
-        name=f"{discord_name} ({atcoder_name})",
-        value=f"総AC数: **{ac_count}** AC　連続AC: **{streak_text}**",
-        inline=False
-      )
+      fields.append((
+        f"{discord_name} ({atcoder_name})",
+        f"総AC数: **{ac_count}** AC　連続AC: **{streak_text}**"
+      ))
 
-    await interaction.edit_original_response(embed=embed)
+    embeds = build_embeds("全員の精進状況", 0x3498db, interaction.created_at, fields)
+    await send_embeds_to_interaction(interaction, embeds)
   except Exception as e:
     print(e)
     await interaction.edit_original_response(content=f"⚠️ エラーが発生しました。お手数ですが(<@{admin_id}>)までご連絡ください。")
@@ -668,46 +716,11 @@ async def abc_ranking(interaction: discord.Interaction, contest_number: int):
       )
       return
 
-    embed = discord.Embed(
-      title=f"🏆 ABC{contest_number:03d} 登録ユーザーランキング",
-      color=0xFFD700,
-      timestamp=interaction.created_at
+    embeds = build_embeds(
+      f"🏆 ABC{contest_number:03d} 登録ユーザーランキング", 0xFFD700, interaction.created_at,
+      abc_ranking_fields(rated, unrated)
     )
-
-    prev_rank = -1
-    place = 0
-    for i, d in enumerate(rated):
-      if d["rank"] != prev_rank:
-        place = i + 1
-      if place == 1:
-        figure = "🥇"
-      elif place == 2:
-        figure = "🥈"
-      elif place == 3:
-        figure = "🥉"
-      else:
-        figure = "👤"
-      rc = d.get("rate_change", 0)
-      rc_str = f"+{rc}" if rc >= 0 else str(rc)
-      embed.add_field(
-        name=f"{figure} {place}位 : {d['atcoder_name']}({d['discord_name']})",
-        value=f"Rank: **{d['rank']}** 位　AC: **{d.get('ac_count', 0)}** 問　Perf: **{d['performance']}**　Rate: **{rc_str}** ({d['old_rating']} → {d['new_rating']})",
-        inline=False
-      )
-      prev_rank = d["rank"]
-
-    if unrated:
-      unrated_lines = [
-        f"{d['atcoder_name']}({d['discord_name']})  {d['rank']}位  AC: {d.get('ac_count', 0)}問"
-        for d in unrated
-      ]
-      embed.add_field(
-        name="📋 Unrated参加者",
-        value="\n".join(unrated_lines),
-        inline=False
-      )
-
-    await interaction.edit_original_response(embed=embed)
+    await send_embeds_to_interaction(interaction, embeds)
   except Exception as e:
     print(e)
     await interaction.edit_original_response(
@@ -721,14 +734,16 @@ async def abc_ranking(interaction: discord.Interaction, contest_number: int):
 @tree.error
 async def on_app_command_error(interaction: discord.Interaction, error: app_commands.AppCommandError):
   error_message = f"<@{admin_id}> エラー起きたぞ"
-  print(f"コマンド'{interaction.command.name}'でエラー発生")
+  command_name = interaction.command.name if interaction.command else "不明"
+  print(f"コマンド'{command_name}'でエラー発生: {error}")
   try:
     if interaction.response.is_done():
       await interaction.followup.send(content=error_message, ephemeral=True)
     else:
       await interaction.response.send_message(error_message, ephemeral=True)
-    admin = await client.fetch_user(admin_id)
-    await admin.send(f"エラー\n: '/{interaction.command.name}'\n実行者: {interaction.user}\nエラー内容{error}")
+    if admin_id:
+      admin = await client.fetch_user(int(admin_id))
+      await admin.send(f"エラー\n: '/{command_name}'\n実行者: {interaction.user}\nエラー内容{error}")
   except Exception as e:
     print(f"エラー発生: {e}")
 

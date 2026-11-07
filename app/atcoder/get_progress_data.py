@@ -1,6 +1,8 @@
 import sqlite3
 
-async def get_progress_data(atcoder_name, days, db_file):
+async def get_progress_data(atcoder_name, days, db_file, x_axis="ac"):
+  """期間内のコンテストごとの (横軸の値, レート) のリストを返す。
+  x_axis="ac" なら期間内の累積AC数、"point" なら累積獲得点数 (問題ごとに最大点を1回だけ加算)。"""
   from atcoder.parse_atcoder_time import parse_atcoder_time
   from atcoder.count_period_ac import get_period_start_unix
   try:
@@ -47,20 +49,22 @@ async def get_progress_data(atcoder_name, days, db_file):
     with sqlite3.connect(db_file) as conn:
       cursor = conn.cursor()
       cursor.execute("""
-        SELECT problem_id, epoch_second FROM ac_submissions_cache
+        SELECT problem_id, epoch_second, point FROM ac_submissions_cache
         WHERE atcoder_name = ? AND epoch_second >= ?
         ORDER BY epoch_second ASC
       """, (atcoder_name, period_start_unix))
       ac_rows = cursor.fetchall()
 
     points = [(0, initial_rating)]
-    solved = set()
+    best_point = {}  # problem_id -> その問題で得た最大点
     sub_idx = 0
     for contest in period_contests:
       while sub_idx < len(ac_rows) and ac_rows[sub_idx][1] <= contest["end_unix"]:
-        solved.add(ac_rows[sub_idx][0])
+        problem_id, _epoch, point = ac_rows[sub_idx]
+        best_point[problem_id] = max(best_point.get(problem_id, 0), point or 0)
         sub_idx += 1
-      points.append((len(solved), contest["new_rating"]))
+      x = sum(best_point.values()) if x_axis == "point" else len(best_point)
+      points.append((x, contest["new_rating"]))
 
     return points
 
