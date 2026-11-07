@@ -1,19 +1,13 @@
 import sqlite3
-from datetime import datetime, timezone, timedelta
 
 async def get_ac_rate_change_data(user_dict, days, db_file):
   from atcoder.parse_atcoder_time import parse_atcoder_time
-  from atcoder.count_period_ac import count_period_ac
-  JST = timezone(timedelta(hours=9))
-  now = datetime.now(JST)
-  period_start_unix = int((now - timedelta(days=days)).timestamp())
+  from atcoder.count_period_ac import get_period_start_unix
+  period_start_unix = get_period_start_unix(days)
 
   result = {}
   for atcoder_name, discord_name in user_dict.items():
     try:
-      ac_data = await count_period_ac(atcoder_name, days, db_file)
-      ac_count = ac_data[0]
-
       with sqlite3.connect(db_file) as conn:
         cursor = conn.cursor()
         cursor.execute("""
@@ -45,10 +39,9 @@ async def get_ac_rate_change_data(user_dict, days, db_file):
 
       result[atcoder_name] = {
         "discord_name": discord_name,
-        "ac": ac_count,
         "rate_change": rate_change
       }
     except Exception as e:
-      result[atcoder_name] = {"discord_name": discord_name, "ac": 0, "rate_change": 0}
+      result[atcoder_name] = {"discord_name": discord_name, "rate_change": 0}
 
   return result

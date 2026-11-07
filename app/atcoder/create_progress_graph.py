@@ -1,7 +1,7 @@
 import matplotlib.pyplot as plt
 import io
 
-def create_progress_graph(all_user_data):
+def create_progress_graph(all_user_data, x_label="AC数"):
   try:
     import japanize_matplotlib as _japanize
     _japanize
@@ -32,7 +32,7 @@ def create_progress_graph(all_user_data):
     plt.close()
     return None
 
-  ax.set_xlabel("AC数", fontsize=12)
+  ax.set_xlabel(x_label, fontsize=12)
   ax.set_ylabel("レート", fontsize=12)
   ax.set_title("精進レートグラフ", fontsize=14, fontweight='bold')
   ax.legend(loc='best', fontsize=10)

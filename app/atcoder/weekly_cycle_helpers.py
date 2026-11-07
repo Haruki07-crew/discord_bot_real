@@ -67,3 +67,20 @@ def get_weekly_snapshots(cycle_id, db_file):
       result[name] = []
     result[name].append((week, ac, point, rc))
   return result
+
+
+def get_weekly_last_posted(db_file):
+  """最後に週次投稿を行った日付 (JST, 'YYYY-MM-DD') を返す。未投稿なら None。"""
+  with sqlite3.connect(db_file) as conn:
+    row = conn.execute("SELECT value FROM bot_state WHERE key = 'weekly_last_posted'").fetchone()
+  return row[0] if row else None
+
+
+def set_weekly_last_posted(date_str, db_file):
+  """週次投稿を行った日付を記録する (同じ日に二重に週を進めないため)。"""
+  with sqlite3.connect(db_file) as conn:
+    conn.execute(
+      "INSERT OR REPLACE INTO bot_state (key, value) VALUES ('weekly_last_posted', ?)",
+      (date_str,)
+    )
+    conn.commit()

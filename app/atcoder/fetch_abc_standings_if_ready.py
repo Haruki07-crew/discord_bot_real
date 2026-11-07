@@ -1,8 +1,8 @@
 import aiohttp
-import sqlite3
+import time
+from atcoder.parse_atcoder_time import parse_atcoder_time
 import discord_logger
-from atcoder.get_contest_ac_count import get_contest_ac_count
-from atcoder.get_contest_end_time import get_contest_end_time_unix
+from atcoder.build_abc_standings import build_abc_standings
 
 async def fetch_abc_standings_if_ready(contest_number, db_file):
   """
@@ -29,50 +29,10 @@ async def fetch_abc_standings_if_ready(contest_number, db_file):
 
   rated_entries = [e for e in data if e.get("IsRated", False)]
   if not any(e.get("NewRating", 0) > 0 for e in rated_entries):
-    return None
+    # コンテストが unrated になった場合はレートが確定しないので、終了から24時間経っていれば確定扱いにする
+    # (そうしないと以降のABCの自動投稿が全て止まる)
+    end_dt = parse_atcoder_time(data[0].get("EndTime"))
+    if end_dt is None or time.time() - end_dt.timestamp() < 24 * 60 * 60:
+      return None
 
-  with sqlite3.connect(db_file) as conn:
-    cursor = conn.cursor()
-    cursor.execute("SELECT atcoder_name, discord_name FROM users")
-    user_dict = {row[0]: row[1] for row in cursor.fetchall()}
-
-  if not user_dict:
-    return [], []
-
-  end_time_unix = get_contest_end_time_unix(contest_number, db_file)
-
-  rated = []
-  unrated = []
-
-  for entry in data:
-    atcoder_name = entry.get("UserScreenName", "")
-    if atcoder_name not in user_dict:
-      continue
-
-    old_rating = entry.get("OldRating", 0)
-    new_rating = entry.get("NewRating", 0)
-
-    ac_count = 0
-    if end_time_unix is not None:
-      ac_count = get_contest_ac_count(atcoder_name, contest_number, end_time_unix, db_file)
-
-    record = {
-      "atcoder_name": atcoder_name,
-      "discord_name": user_dict[atcoder_name],
-      "rank": entry.get("Place", 0),
-      "performance": max(entry.get("Performance", 0), 0),
-      "old_rating": old_rating,
-      "new_rating": new_rating,
-      "rate_change": new_rating - old_rating,
-      "ac_count": ac_count,
-    }
-
-    if entry.get("IsRated", False):
-      rated.append(record)
-    else:
-      unrated.append(record)
-
-  rated.sort(key=lambda x: x["rank"])
-  unrated.sort(key=lambda x: x["rank"])
-
-  return rated, unrated
+  return await build_abc_standings(data, contest_number, db_file)

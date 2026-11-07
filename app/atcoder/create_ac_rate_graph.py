@@ -1,7 +1,8 @@
 import matplotlib.pyplot as plt
 import io
 
-def create_ac_rate_graph(user_data, label):
+def create_ac_rate_graph(user_data, label, x_label="AC数"):
+  # user_data: {name: {"ac": 横軸の値, "rate_change": int}}  (点数版では "ac" に点数を入れる)
   try:
     import japanize_matplotlib as japanize
     japanize
@@ -26,9 +27,9 @@ def create_ac_rate_graph(user_data, label):
     ax.annotate(name, (ac, rc), textcoords="offset points", xytext=(6, 4), fontsize=9, color=color)
 
   ax.axhline(y=0, color='gray', linestyle='--', linewidth=1, alpha=0.7, zorder=2)
-  ax.set_xlabel("AC数", fontsize=12)
+  ax.set_xlabel(x_label, fontsize=12)
   ax.set_ylabel("レート変化", fontsize=12)
-  ax.set_title(f"AC数 vs レート変化 [{label}]", fontsize=14, fontweight='bold')
+  ax.set_title(f"{x_label} vs レート変化 [{label}]", fontsize=14, fontweight='bold')
   ax.grid(True, alpha=0.3, zorder=1)
 
   buf = io.BytesIO()
