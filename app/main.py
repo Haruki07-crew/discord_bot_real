@@ -15,7 +15,9 @@ from server import server_thread
 import discord_logger
 
 intents = discord.Intents.all()
-client = discord.Client(intents=intents)
+# discord_name は /user_register で自由入力されるため、"@everyone" などを入れると返信で全員に通知が飛ぶ。
+# @everyone/@here とロールへのメンションは無効にする (admin への <@id> メンションは残す)
+client = discord.Client(intents=intents, allowed_mentions=discord.AllowedMentions(everyone=False, roles=False, users=True))
 tree = app_commands.CommandTree(client)
 
 admin_id = config.ADMIN_ID
