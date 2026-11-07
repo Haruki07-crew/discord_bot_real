@@ -415,18 +415,28 @@ async def before_auto_abc_ranking():
   await client.wait_until_ready()
 
 
+_commands_synced = False
+
 ## @brief Bot起動時のイベントハンドラ
 ## @details DBの初期化とSlashコマンドの同期を行う
 @client.event
 async def on_ready():
+  global _commands_synced
   init_db(DB_FILE)
-  await tree.sync()
+  # 自動投稿タスクを先に起動する (sync が失敗しても自動投稿は止めない)
   if not daily_update.is_running():
     daily_update.start()
   if not weekly_ranking_post.is_running():
     weekly_ranking_post.start()
   if not auto_abc_ranking.is_running():
     auto_abc_ranking.start()
+  # on_ready は再接続のたびに呼ばれる。sync はレート制限が厳しいので起動後1回だけ行う
+  if not _commands_synced:
+    try:
+      await tree.sync()
+      _commands_synced = True
+    except Exception as e:
+      print(f"[on_ready] tree.sync failed (retry on next reconnect): {e}")
   if log_channel_id is not None:
     discord_logger.set_log_channel(client.get_channel(log_channel_id))
   await ensure_prev_contest()
