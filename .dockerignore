@@ -1,0 +1,12 @@
+# トークンをイメージに含めないよう .env は入れない (docker run --env-file で渡す)
+.env
+**/.env
+# ローカルのデータベースをイメージに含めない
+database.db
+**/database.db
+.git
+**/__pycache__
+*.pyc
+.DS_Store
+.vscode
+.claude

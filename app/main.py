@@ -9,6 +9,7 @@ import config as config
 from atcoder import *
 import asyncio
 import datetime
+import os
 import re
 import time
 from server import server_thread
@@ -23,7 +24,10 @@ tree = app_commands.CommandTree(client)
 admin_id = config.ADMIN_ID
 ranking_channel_id = int(config.RANKING_CHANNEL_ID) if config.RANKING_CHANNEL_ID else None
 log_channel_id = int(config.LOG_CHANNEL_ID) if config.LOG_CHANNEL_ID else None
-DB_FILE = "database.db"
+# DBの保存先。Docker などでデータを残すには、永続化したい場所を DB_PATH で指定する (未指定なら起動ディレクトリの database.db)
+DB_FILE = config.DB_PATH
+if os.path.dirname(DB_FILE):
+  os.makedirs(os.path.dirname(DB_FILE), exist_ok=True)
 
 
 JST = datetime.timezone(datetime.timedelta(hours=9))

@@ -1,424 +1,229 @@
 # AtCoder 精進管理 Discord Bot
 
-AtCoderの精進記録・コンテスト結果・レート変化を自動で収集し、Discord上でランキングやグラフとして配信するBot。
+AtCoder の精進(AC数・獲得点数)とレートの変化を自動で集計して、Discord にランキングやグラフを投稿する Bot です。
+サークルや学校の仲間で「誰がどれだけ精進したか」を見える化して、競い合うために作りました。
 
----
+## できること
 
-## ディレクトリ構成
-
-```
-app/
-  main.py                 Botのエントリーポイント。スラッシュコマンド・自動タスクの定義
-  config.py               環境変数の読み込み (DISCORD_TOKEN, ADMIN_ID, RANKING_CHANNEL_ID)
-  server.py               ヘルスチェック用HTTPサーバー (FastAPI + uvicorn, デーモンスレッド)
-  discord_logger.py       API呼び出しをDiscordチャンネルにログ出力するユーティリティ
-  database.db             SQLiteデータベース (実行時に自動生成)
-  .env                    環境変数ファイル
-
-  atcoder/
-    __init__.py            全モジュールの re-export
-    init_db.py             DB初期化のエントリーポイント
-    init_progress_tables.py  テーブル作成 (contest_history, ac_submissions_cache, update_bookmark, weekly_snapshots, weekly_cycle)
-    init_auto_post_table.py  テーブル作成 (auto_posted_contests, bot_state)
-
-    --- ユーザー管理 ---
-    register_user.py       ユーザー登録 (INSERT)
-    delete_user.py         ユーザー削除 (DELETE)
-    get_user_dict.py       全ユーザーの {atcoder_name: discord_name} 辞書を返す
-    get_registered_user.py 指定ユーザーの登録情報を返す (二重登録チェック用)
-    get_register_id.py     登録者IDを返す (解除権限チェック用)
-    get_all_users_with_discord_id.py  全ユーザーの (atcoder_name, discord_name, discord_id) を返す
-
-    --- データ取得・キャッシュ ---
-    initial_fetch_user_data.py        コンテスト履歴 + AC提出を一括取得 / refresh_users_data (集計前の差分更新)
-    atcoder_user_exists.py            ユーザーページの404でAtCoderユーザーの存在を確認
-    fetch_and_cache_contest_history.py コンテスト履歴をAtCoder APIから取得しDBにキャッシュ
-    fetch_and_cache_ac_submissions.py  AC提出をkenkoooo APIから取得しDBにキャッシュ
-    get_ac_count.py                    総AC数を返す (DBキャッシュ優先、なければAPI)
-    count_period_ac.py                 指定期間のAC数と合計点数を返す [ac_count, point_sum]
-    count_period_ac2.py                count_period_acの拡張版 (難易度合計も返す)
-    get_latest_rating.py               AtCoder APIから現在のレートを文字列で返す
-    get_latest_rating_nofstring.py     AtCoder APIから現在のレートを数値で返す
-    get_latest_rating_from_db.py       DBキャッシュから最新レートを返す
-    get_rate_heart.py                  レート値に応じたハート絵文字を返す
-    parse_atcoder_time.py              AtCoderの日時文字列をdatetimeに変換
-    get_ac_streak.py                   昨日から遡って何日連続でACしているかを返す (今日は含めない)
-
-    --- ランキング生成 ---
-    AC_fight.py              全ユーザーのAC数を取得し降順ソートしたリストを返す
-    make_growth_ranking.py   レート変化(第1キー) + AC数(第2キー) でランキングを生成
-    get_ac_rate_change_data.py  全ユーザーの期間内AC数・レート変化を辞書で返す
-
-    --- グラフ生成 ---
-    create_ac_rate_graph.py    散布図 (横軸: AC数, 縦軸: レート変化)。7日以内の期間で使用
-    create_progress_graph.py   折れ線グラフ (横軸: AC数, 縦軸: レート)。8日以上の期間で使用
-    create_weekly_graph.py     累積折れ線グラフ (12週サイクル)。週次自動投稿で使用
-    get_progress_data.py       期間内のコンテスト参加ポイント列 [(ac_count, rating), ...] を返す
-
-    --- ABC コンテスト ---
-    get_abc_standings.py             指定ABCの結果を取得し、登録ユーザーをrated/unratedに分類
-    fetch_abc_standings_if_ready.py  ABC結果がレート確定済みか判定し、確定時のみ結果を返す
-    build_abc_standings.py           results/jsonから登録ユーザーを抽出 (上2つの共通処理。参加者の提出キャッシュを更新してからAC数を数える)
-    get_contest_ac_count.py          コンテスト中のAC数をac_submissions_cacheからカウント
-    get_contest_end_time.py          contest_historyからコンテスト終了時刻を取得
-    get_prev_contest.py              最後に処理したABCコンテスト番号を取得
-    set_prev_contest.py              最後に処理したABCコンテスト番号を保存
-    get_latest_ended_abc_number.py   直近の終了済みABC番号をAPIから取得
-    is_contest_auto_posted.py        自動投稿済みかどうかを判定
-    mark_contest_auto_posted.py      自動投稿済みとしてマーク
-
-    --- 週次サイクル ---
-    weekly_cycle_helpers.py   12週サイクルの管理、スナップショットの保存・取得
-
-    --- その他 ---
-    fetch_problem.py   kenkoooo の problem-models.json を取得しキャッシュ
-    get_diff.py        問題の生difficulty値を加工して返す
-```
-
----
-
-## スラッシュコマンド一覧
-
-### /syozin
-
-指定ユーザーの精進記録を表示する。
-
-| パラメータ | 型 | 説明 |
-|---|---|---|
-| atcoder_name | str | AtCoderユーザー名 |
-
-表示内容: 通算AC数、今日のAC数、今日の獲得点数
-
-登録済みユーザーの場合は、表示前に提出キャッシュを差分更新する。
-
-### /user_register
-
-AtCoderユーザーをBotに登録する。
-
-| パラメータ | 型 | 説明 |
-|---|---|---|
-| atcoder_name | str | AtCoderユーザー名 |
-| discord_name | str | Discordの表示名 (手動入力) |
-
-処理: AtCoder APIでユーザー存在確認 -> DB登録 -> コンテスト履歴・AC提出を全件取得してキャッシュ
-
-### /user_unregister
-
-登録を解除する。登録者本人またはadminのみ実行可能。そのユーザーの提出・コンテスト履歴のキャッシュも削除する。
-
-| パラメータ | 型 | 説明 |
-|---|---|---|
-| atcoder_name | str | AtCoderユーザー名 (オートコンプリート対応) |
-
-### /user_list
-
-登録ユーザーの一覧と最新レートを表示する。レート帯に応じたハート色で装飾する。
-
-### /everyone_state
-
-全登録ユーザーの総AC数と連続AC日数を一覧表示する。
-データはdaily_update (毎日 1:00 JST) で更新されるキャッシュをもとに計算する。
-
-表示内容: 各ユーザーの総AC数、昨日から遡って何日連続でACしているか (今日の分は含めない)
-
-ソート: 連続AC日数(降順) -> 総AC数(降順)
-
-### /diligence_growth
-
-指定期間のレート変化とAC数のランキングを表示する。期間は今日を含めた日数 (1日 = 今日の0:00から、1週間 = 6日前の0:00から)。
-
-| パラメータ | 型 | 選択肢 |
-|---|---|---|
-| period | Choice | 1日 / 1週間 / 1ヶ月 / 3ヶ月 / 半年 / 1年 |
-
-ソート: レート変化(降順) -> AC数(降順)
-
-表示前に全登録ユーザーのキャッシュを差分更新する (登録人数 × 1〜3秒ほどかかる)。
-
-グラフ:
-- 7日以内: 散布図 (横軸: AC数, 縦軸: レート変化)
-- 8日以上: 折れ線グラフ (横軸: AC数, 縦軸: レート)
-
-### /diligence_growth_point
-
-/diligence_growth の点数版。横軸がAC数ではなく獲得点数になる。
-
-| パラメータ | 型 | 選択肢 |
-|---|---|---|
-| period | Choice | 1日 / 1週間 / 1ヶ月 / 3ヶ月 / 半年 / 1年 |
-
-ソート: レート変化(降順) -> 点数(降順)
-
-### /abc_ranking
-
-指定したABCコンテストの登録ユーザーランキングを表示する。
-
-| パラメータ | 型 | 説明 |
-|---|---|---|
-| contest_number | int | ABCのコンテスト番号 (1-999) |
-
-表示内容: 順位、コンテスト中のAC数、パフォーマンス、レート変化、rated/unrated分類
-
-コンテスト中のAC数は ac_submissions_cache から算出する (コンテスト終了時刻 - 100分 の範囲)。
-終了時刻は results/json の EndTime を使い、集計前に参加者の提出キャッシュを差分更新する。
-
----
-
-## 一括登録メッセージ
-
-ADMIN_IDのユーザーが特定のメッセージを送信すると、事前定義されたユーザーを一括登録する。
-
-| メッセージ | 対象 |
+| | 内容 |
 |---|---|
-| テスト用にユーザー登録 | TEST_USERS (11人) - メインメンバー |
-| 他高専テスト用に登録 | OTHER_KOSEN_USERS (9人) - 他高専メンバー |
+| 📈 精進の記録 | `/syozin` で今日のAC数・獲得点数・これまでのAC数を表示 |
+| 🏆 ランキング | `/diligence_growth` で、1日〜1年の期間のレート変化とAC数のランキングとグラフを表示 |
+| 🔥 連続AC | `/everyone_state` で、全員の総AC数と何日連続でACしているかを表示 |
+| 🥇 ABCの結果 | ABC のレートが確定すると、登録メンバーの順位・AC数・パフォーマンスを**自動で投稿** |
+| 📊 週次レポート | 毎週月曜 0:15 に、先週のランキングと12週分の累積グラフを**自動で投稿** |
 
 ---
 
-## 自動タスク
+## 導入手順
 
-### daily_update
+全体の流れ:
 
-毎日 1:00 JST に実行。全登録ユーザーのコンテスト履歴とAC提出をAPIから取得し、DBキャッシュを更新する。ユーザー間で1.5秒のインターバルを入れてAPIレート制限を回避する。
+1. Discord で Bot を作る (Developer Portal)
+2. Bot を自分のサーバーに招待する
+3. 必要な ID を集める
+4. `.env` に設定を書く
+5. Bot を起動する
+6. 動作を確認する
 
-### weekly_ranking_post
+所要時間は 15〜20 分ほどです。
 
-毎週月曜 0:15 JST に実行。daily_update より前に走るため、集計前に全登録ユーザーのキャッシュを差分更新する。
-同じ日に二重に実行されても週番号が進まないよう、`bot_state` の `weekly_last_posted` に投稿日を記録する。
+### 1. Discord で Bot を作る
 
-1. 直近1週間のAC数・点数・レート変化のランキングをテキストで投稿
-2. 12週サイクルの累積折れ線グラフを2枚投稿
-   - AC数版: 横軸=累積AC数, 縦軸=累積レート変化
-   - 点数版: 横軸=累積点数, 縦軸=累積レート変化
+1. [Discord Developer Portal](https://discord.com/developers/applications) を開き、右上の **New Application** を押す。名前 (例: `AtCoder Bot`) を入力して作成する。
+2. 左のメニューから **Bot** を開く。
+3. **Reset Token** を押してトークンを表示し、コピーしておく。これが `DISCORD_TOKEN` になる。
+   > ⚠️ トークンはパスワードと同じです。他人に見せたり、GitHub に push したりしないでください。漏れたらすぐに Reset Token で作り直してください。
+4. 同じ **Bot** のページの下にある **Privileged Gateway Intents** で、次の3つをすべて **ON** にして保存する。
+   - Presence Intent
+   - Server Members Intent
+   - Message Content Intent
 
-各週のデータは `weekly_snapshots` テーブルに保存される。12週経過後はサイクルIDが進み、グラフは0からリセットされる。
+   > これを忘れると、起動時に `PrivilegedIntentsRequired` というエラーで止まります。
 
-### auto_abc_ranking
+### 2. Bot を自分のサーバーに招待する
 
-1時間ごとに実行。前回処理したABC番号 (`prev_contest`) の次のコンテスト結果をAtCoder APIで確認し、レート確定済みであれば登録ユーザーのランキングを自動投稿する。投稿に成功してから `prev_contest` を更新する (送信に失敗した場合は次の実行で再試行)。
+1. 左のメニューから **OAuth2** → **URL Generator** を開く。
+2. **SCOPES** で `bot` と `applications.commands` にチェックを入れる。
+3. 下に出てくる **BOT PERMISSIONS** で、次にチェックを入れる。
+   - View Channels (チャンネルを見る)
+   - Send Messages (メッセージを送信)
+   - Embed Links (埋め込みリンク)
+   - Attach Files (ファイルを添付) ← グラフ画像の投稿に必要
+   - Read Message History (メッセージ履歴を読む)
+4. 一番下に出る URL をブラウザで開き、Bot を入れたいサーバーを選んで **認証** する。
 
-`prev_contest` が未設定の場合は、kenkoooo のコンテスト一覧から直近に終了したABC番号を取得して初期化する。取得できなかった場合は初期化せず次の実行で再試行する (固定値で初期化すると古いABCが連投されるため)。
+### 3. 必要な ID を集める
 
----
+ID をコピーするには、まず Discord の **開発者モード** を ON にします。
+(Discord の **ユーザー設定** → **詳細設定** → **開発者モード**)
 
-## データベース設計
+ON にすると、右クリックメニューに **ID をコピー** が出るようになります。
 
-DB: SQLite (`database.db`)
-
-### users
-
-ユーザー登録情報。
-
-| カラム | 型 | 説明 |
+| 何の ID か | コピーの仕方 | 設定する名前 |
 |---|---|---|
-| atcoder_name | TEXT (PK) | AtCoderユーザー名 |
-| discord_name | TEXT | Discordの表示名 |
-| discord_id | INTEGER | DiscordユーザーID |
-| register_id | INTEGER | 登録操作を行ったユーザーのDiscord ID |
+| 管理者 (あなた) のユーザーID | 自分のアイコンを右クリック → ID をコピー | `ADMIN_ID` |
+| ランキングを自動投稿するチャンネル | チャンネル名を右クリック → チャンネルIDをコピー | `RANKING_CHANNEL_ID` |
+| APIログを流すチャンネル (任意) | 同上。ログ専用のチャンネルを作っておくのがおすすめ | `LOG_CHANNEL_ID` |
 
-### contest_history
+### 4. `.env` に設定を書く
 
-AtCoderのRatedコンテスト参加履歴。
+`app/.env` というファイルを作り、次のように書きます (値は自分のものに置き換える)。
 
-| カラム | 型 | 説明 |
-|---|---|---|
-| atcoder_name | TEXT (PK) | AtCoderユーザー名 |
-| contest_screen_name | TEXT (PK) | コンテスト識別名 |
-| end_time | TEXT | コンテスト終了時刻 |
-| new_rating | INTEGER | コンテスト後のレート |
-| old_rating | INTEGER | コンテスト前のレート |
-
-### ac_submissions_cache
-
-AC (正解) 提出のキャッシュ。
-
-| カラム | 型 | 説明 |
-|---|---|---|
-| atcoder_name | TEXT (PK) | AtCoderユーザー名 |
-| submission_id | INTEGER (PK) | 提出ID |
-| problem_id | TEXT | 問題ID |
-| epoch_second | INTEGER | 提出時刻 (Unix秒) |
-| point | INTEGER | 獲得点数 |
-
-### update_bookmark
-
-データ取得の進捗管理。差分取得に使用する。
-
-| カラム | 型 | 説明 |
-|---|---|---|
-| atcoder_name | TEXT (PK) | AtCoderユーザー名 |
-| contest_last_fetched | REAL | コンテスト履歴の最終取得時刻 (Unix秒) |
-| submission_last_id | INTEGER | 最後に取得した提出ID |
-| submission_cache_from | REAL | キャッシュの開始epoch |
-| submission_last_fetch | REAL | 最終取得時刻 (Unix秒) |
-
-### weekly_snapshots
-
-週次自動投稿用のスナップショット。12週サイクルのグラフ描画に使用する。
-
-| カラム | 型 | 説明 |
-|---|---|---|
-| cycle_id | INTEGER (PK) | サイクル番号 (12週ごとに増加) |
-| week_number | INTEGER (PK) | 週番号 (1-12) |
-| atcoder_name | TEXT (PK) | AtCoderユーザー名 |
-| ac_count | INTEGER | その週のAC数 |
-| ac_point | INTEGER | その週の獲得点数 |
-| rate_change | INTEGER | その週のレート変化 |
-
-### weekly_cycle
-
-現在の週次サイクル状態を管理する (レコードは常に1行)。
-
-| カラム | 型 | 説明 |
-|---|---|---|
-| id | INTEGER (PK) | 常に1 |
-| cycle_id | INTEGER | 現在のサイクル番号 |
-| current_week | INTEGER | 現在の週番号 (0: 初期状態, 1-12: 進行中) |
-
-### bot_state
-
-Bot全体のキーバリューストア。現在は `prev_contest` の管理に使用。
-
-| カラム | 型 | 説明 |
-|---|---|---|
-| key | TEXT (PK) | キー名 |
-| value | TEXT | 値 |
-
-### auto_posted_contests
-
-自動投稿済みのコンテストを記録し、二重投稿を防止する。
-
-| カラム | 型 | 説明 |
-|---|---|---|
-| contest_id | TEXT (PK) | コンテストID (例: "abc450") |
-| posted_at | REAL | 投稿時刻 (Unix秒) |
-
----
-
-## 外部API
-
-### AtCoder API
-
-| エンドポイント | 用途 | 呼び出し元 |
-|---|---|---|
-| `atcoder.jp/users/{user}` | ユーザー存在確認 (存在しなければ404) | atcoder_user_exists |
-| `atcoder.jp/users/{user}/history/json` | コンテスト履歴・レート取得 (存在しないユーザーでも 200 [] を返すため存在確認には使えない) | fetch_and_cache_contest_history, get_latest_rating, get_latest_rating_nofstring |
-| `atcoder.jp/contests/{id}/results/json` | コンテスト結果 (順位・パフォーマンス) | get_abc_standings, fetch_abc_standings_if_ready |
-
-注意事項:
-- User-Agentヘッダーを付与している
-- パフォーマンス値が負の場合は0に補正する (低パフォーマンス時のAPI仕様対応)
-
-### kenkoooo AtCoder Problems API
-
-| エンドポイント | 用途 | 呼び出し元 |
-|---|---|---|
-| `kenkoooo.com/atcoder/atcoder-api/v3/user/submissions` | ユーザーのAC提出一覧 | fetch_and_cache_ac_submissions, count_period_ac, count_period_ac2 |
-| `kenkoooo.com/atcoder/atcoder-api/v3/user/ac_rank` | 総AC数 | get_ac_count |
-| `kenkoooo.com/atcoder/resources/contests.json` | コンテスト一覧 | get_latest_ended_abc_number |
-| `kenkoooo.com/atcoder/resources/problem-models.json` | 問題の難易度モデル | fetch_problem |
-
-注意事項:
-- ページネーション: 1回500件、`from_id`で差分取得。ページ間に0.8秒のインターバル
-- AHC (AtCoder Heuristic Contest) の問題はproblem_idに "ahc" を含むため除外している
-- レスポンスは `content_type=None` で解析 (サーバーのContent-Typeが不安定なため)
-
-### 共通のAPIハンドリング
-
-- 全API呼び出しに30秒のタイムアウトを設定 (connect: 10秒, read: 20秒)
-- API呼び出しはdiscord_loggerで記録され、5秒ごとにまとめて指定チャンネルに送信される (本来の処理は送信を待たない)
-- DBキャッシュの有効期間: コンテスト履歴は600秒 (10分、週次集計の直前は必ず取り直す)、AC提出は60秒
-
----
-
-## データフロー
-
-### ユーザー登録時
-
-```
-/user_register
-  -> atcoder_user_exists()           ... AtCoderユーザーページでユーザー存在確認
-  -> register_user()                 ... usersテーブルにINSERT
-  -> initial_fetch_user_data()
-      -> fetch_and_cache_contest_history()  ... コンテスト履歴を全件取得しDBに保存
-      -> fetch_and_cache_ac_submissions()   ... AC提出を全件取得しDBに保存
+```env
+DISCORD_TOKEN=ここに1でコピーしたトークン
+ADMIN_ID=123456789012345678
+RANKING_CHANNEL_ID=123456789012345678
+LOG_CHANNEL_ID=123456789012345678
 ```
 
-### 日次データ更新 (daily_update, 毎日 1:00 JST)
+| 名前 | 必須? | 説明 |
+|---|---|---|
+| `DISCORD_TOKEN` | ✅ 必須 | Bot のトークン |
+| `ADMIN_ID` | ✅ 必須 | 管理者のユーザーID。エラーの通知が届き、他人の登録を解除できるようになる |
+| `RANKING_CHANNEL_ID` | おすすめ | ABC結果・週次レポートの投稿先。**未設定だと自動投稿はすべて行われない** |
+| `LOG_CHANNEL_ID` | 任意 | APIを呼んだ記録を流すチャンネル。サーバー内に無いIDだとログは送られない |
+| `DB_PATH` | 任意 | データベースの保存場所。未設定なら起動したフォルダの `database.db` |
+| `PORT` | 任意 | 動作確認用 HTTP サーバーのポート (初期値 `8000`) |
 
-```
-daily_update
-  -> get_user_dict()                ... 全登録ユーザーを取得
-  -> initial_fetch_user_data()      ... 各ユーザーの差分データを取得
-      -> fetch_and_cache_contest_history()  ... 前回から1時間以上経過していれば再取得
-      -> fetch_and_cache_ac_submissions()   ... 前回の最終提出時刻(from_second)から差分取得
-```
+`.env` は `.gitignore` に入っているので、Git にはコミットされません。
 
-### 週次ランキング投稿 (weekly_ranking_post, 毎週月曜 0:15 JST)
+### 5. Bot を起動する
 
-```
-weekly_ranking_post
-  -> refresh_users_data()           ... 全ユーザーのキャッシュを差分更新
-  -> make_growth_ranking()          ... 直近7日のランキングを生成
-      -> AC_fight()                 ... 各ユーザーのAC数・点数を取得
-          -> count_period_ac()      ... DBキャッシュから期間AC数を集計
-      -> get_ac_rate_change_data()  ... 各ユーザーのレート変化を計算
-  -> advance_weekly_cycle()         ... 週番号を進める (12週でリセット)
-  -> save_weekly_snapshot()         ... 今週のデータをDBに保存
-  -> get_weekly_snapshots()         ... サイクル全体のデータを取得
-  -> create_weekly_graph(x_axis="ac")     ... AC数版の累積折れ線グラフを生成
-  -> create_weekly_graph(x_axis="point")  ... 点数版の累積折れ線グラフを生成
-  -> Discordに投稿 (テキスト + グラフ2枚)
-```
+起動方法は2つあります。お試しなら **A**、24時間動かし続けるなら **B** がおすすめです。
 
-### ABC自動ランキング (auto_abc_ranking, 1時間ごと)
+#### A. 自分のPCで動かす
 
-```
-auto_abc_ranking
-  -> ensure_prev_contest()                ... 前回処理したABC番号を取得 (未設定ならAPIで初期化)
-  -> fetch_abc_standings_if_ready()       ... 次のABCの結果を確認
-      -> AtCoder results/json API         ... レート確定済みか判定
-      -> build_abc_standings()
-          -> fetch_and_cache_ac_submissions()  ... 参加者の提出キャッシュを差分更新
-          -> get_contest_ac_count()            ... コンテスト中のAC数をDBから算出
-  -> Discordに投稿 (rated/unrated分類のランキング + AC数)
-  -> set_prev_contest()                   ... 投稿成功後にABC番号を更新
-```
-
-### 精進状況表示 (/everyone_state)
-
-```
-/everyone_state
-  -> get_user_dict()       ... 全登録ユーザーを取得
-  -> get_ac_count()        ... 各ユーザーの総AC数を取得
-  -> get_ac_streak()       ... 各ユーザーの連続AC日数を算出
-```
-
----
-
-## 環境変数 (.env)
-
-| 変数名 | 説明 |
-|---|---|
-| DISCORD_TOKEN | Discord Botトークン |
-| ADMIN_ID | 管理者のDiscordユーザーID |
-| RANKING_CHANNEL_ID | ランキング自動投稿先のチャンネルID |
-| LOG_CHANNEL_ID | API呼び出しログの送信先チャンネルID (省略時は従来のチャンネル) |
-| PORT | HTTPサーバーのポート番号 (デフォルト: 8000) |
-
----
-
-## 起動
+Python 3.11 を使ってください (Docker 版と同じバージョン)。
 
 ```bash
+git clone https://github.com/Haruki07-crew/discord_bot_real.git
+cd discord_bot_real
+pip install -r requirements.txt
 cd app
 python main.py
 ```
 
-起動時の処理:
-1. DBの全テーブルを初期化 (init_db)
-2. スラッシュコマンドをDiscordに同期 (tree.sync)
-3. バックグラウンドタスクを開始 (daily_update, weekly_ranking_post, auto_abc_ranking)
-4. prev_contestが未設定の場合、APIから直近のABC番号を取得して初期化 (失敗時は auto_abc_ranking で再試行)
-5. ログ出力用チャンネルを設定
-6. ヘルスチェック用HTTPサーバーをデーモンスレッドで起動
+ターミナルに `activate the bot  now!!!!` と出たら起動成功です。止めるときは `Ctrl + C` を押します。
+データは `app/database.db` に保存されます。
+
+#### B. Docker で動かす (サーバーやクラウドで常時稼働させる場合)
+
+```bash
+git clone https://github.com/Haruki07-crew/discord_bot_real.git
+cd discord_bot_real
+docker build -t atcoder-bot .
+docker run -d --name atcoder-bot --restart unless-stopped \
+  --env-file app/.env \
+  -e DB_PATH=/bot/data/database.db \
+  -v atcoder-bot-data:/bot/data \
+  -p 8000:8000 \
+  atcoder-bot
+```
+
+- ログの確認: `docker logs -f atcoder-bot`
+- 停止: `docker stop atcoder-bot`、再開: `docker start atcoder-bot`
+
+> ⚠️ **データの保存場所に注意してください。**
+> `-v atcoder-bot-data:/bot/data` と `DB_PATH` を指定しないと、データベースはコンテナの中に作られます。
+> その場合、作り直すたびに **登録ユーザーや週次の記録がすべて消えます**。
+>
+> クラウドのホスティングサービスで動かすときも同じです。永続ディスク (Volume) を用意して、`DB_PATH` をその中のパスに設定してください。
+
+ホスティングサービスがヘルスチェックを必要とする場合は、`PORT` で指定したポート (初期値 8000) の `/` に HTTP でアクセスすると `{"message": "Server is Online."}` が返ります。
+
+### 6. 動作を確認する
+
+1. Discord でサーバーを開き、メッセージ欄に `/` を入力する。`/user_register` などが候補に出れば OK。
+   - 出ない場合は、Discord を再読み込み (`Ctrl + R` / Mac は `Cmd + R`) してください。反映までに数分かかることもあります。
+2. `/user_register atcoder_name:自分のAtCoder名 discord_name:表示したい名前` で自分を登録する。
+3. `/syozin atcoder_name:自分のAtCoder名` を実行して、AC数が表示されれば完了です 🎉
+
+---
+
+## 使い方
+
+### メンバーを登録する
+
+| コマンド | 説明 |
+|---|---|
+| `/user_register atcoder_name discord_name` | AtCoder のユーザーを登録する。`discord_name` はランキングに表示される名前 (自由に決めてよい) |
+| `/user_unregister atcoder_name` | 登録を解除する。登録した本人か管理者だけが実行できる |
+| `/user_list` | 登録メンバーと現在のレートの一覧を表示する |
+
+- 登録すると、その人の過去の提出をすべて取り込みます。提出が多い人は数分かかります。
+- AtCoder のユーザー名は、大文字と小文字を区別しません (`Hanaosi` と `hanaosi` は同じ人として扱います)。
+
+### 精進を見る
+
+| コマンド | 説明 |
+|---|---|
+| `/syozin atcoder_name` | 今日のAC数・今日の獲得点数・これまでのAC数を表示する。登録していない人でも見られる |
+| `/everyone_state` | 全員の総AC数と、何日連続でACしているかを表示する (今日の分は含めず、昨日から数える) |
+| `/diligence_growth period` | 期間内のレート変化とAC数のランキングを、グラフ付きで表示する |
+| `/diligence_growth_point period` | `/diligence_growth` の点数版。AC数のかわりに獲得点数で比べる |
+| `/abc_ranking contest_number` | 指定した ABC (例: `483`) での、登録メンバーの順位・AC数・パフォーマンス・レート変化を表示する |
+
+**`/diligence_growth` の期間** は、今日を含めた日数で数えます。
+
+- `1日`: 今日の 0:00 から今まで
+- `1週間`: 6日前の 0:00 から今まで
+- `1ヶ月` / `3ヶ月` / `半年` / `1年`: 同様に 30 / 90 / 180 / 365 日分
+
+グラフは、1週間以内なら散布図 (横軸: AC数、縦軸: レート変化) です。それより長い期間では、レートの推移を表す折れ線グラフになります。
+
+> 💡 `/diligence_growth` と `/everyone_state` は、最新の状態で集計するために全員分のデータを取り直します。
+> そのため、返事が出るまでに **登録人数 × 1〜2秒** ほどかかります (17人で20〜30秒くらい)。
+
+### 自動で投稿されるもの
+
+`RANKING_CHANNEL_ID` に設定したチャンネルに投稿されます。
+
+| タイミング | 内容 |
+|---|---|
+| ABC のレートが確定したあと (1時間ごとに確認) | その ABC に参加した登録メンバーのランキング |
+| 毎週月曜 0:15 | 先週 (月〜日) のランキングと、12週分の累積グラフ (AC数版・点数版) |
+
+- 毎日 1:00 には、全員のデータをまとめて更新します (投稿はしません)。
+- 週次レポートは12週で1サイクルです。13週目からはグラフがリセットされます。
+- 月曜 0:15 に Bot が止まっていても、その日のうちに起動すれば週次レポートを投稿します。
+
+### 管理者向け: まとめて登録する
+
+`ADMIN_ID` のユーザーが、Bot がいるチャンネルで次のメッセージを送ると、`app/main.py` に書かれたメンバーをまとめて登録します。
+
+| メッセージ | 登録されるメンバー |
+|---|---|
+| `テスト用にユーザー登録` | `TEST_USERS` |
+| `他高専テスト用に登録` | `OTHER_KOSEN_USERS` |
+
+メンバーを変えたいときは、`app/main.py` の `TEST_USERS` / `OTHER_KOSEN_USERS` を書き換えてください。
+
+---
+
+## 困ったとき
+
+| 症状 | 原因と対処 |
+|---|---|
+| 起動時に `PrivilegedIntentsRequired` | 手順1-4 の Intents を3つとも ON にする |
+| 起動時に `LoginFailure` / `Improper token` | `DISCORD_TOKEN` が間違っている。Developer Portal で Reset Token してコピーし直す |
+| `/` を入力してもコマンドが出ない | 招待するときに `applications.commands` を付け忘れている (手順2 をやり直す)。または Discord を再読み込みする |
+| グラフが出ない / 送信に失敗する | Bot に **Attach Files** と **Embed Links** の権限があるか確認する |
+| ABC の結果や週次レポートが投稿されない | `RANKING_CHANNEL_ID` が正しいか、Bot がそのチャンネルを見られるか確認する |
+| 再起動したら登録が消えた | データベースがコンテナの中にある。手順5-B のように `DB_PATH` と Volume を設定する |
+| 「⚠️ エラーが発生しました」と出る | ターミナル (Docker なら `docker logs atcoder-bot`) にエラーの詳細が出ているので確認する |
+
+---
+
+## データの取得元
+
+- [AtCoder](https://atcoder.jp/): コンテストの成績とレート
+- [AtCoder Problems (kenkoooo)](https://kenkoooo.com/atcoder/): 提出の履歴
+
+どちらにも負荷をかけないように、ユーザーごとに1秒以上の間を空けてアクセスしています。
+
+---
+
+## 開発者向け
+
+ファイル構成、データベースの設計、内部の処理の流れは [docs/development.md](docs/development.md) にまとめています。
