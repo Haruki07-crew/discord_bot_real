@@ -30,7 +30,8 @@ app/
     get_all_users_with_discord_id.py  全ユーザーの (atcoder_name, discord_name, discord_id) を返す
 
     --- データ取得・キャッシュ ---
-    initial_fetch_user_data.py        コンテスト履歴 + AC提出を一括取得
+    initial_fetch_user_data.py        コンテスト履歴 + AC提出を一括取得 / refresh_users_data (集計前の差分更新)
+    atcoder_user_exists.py            ユーザーページの404でAtCoderユーザーの存在を確認
     fetch_and_cache_contest_history.py コンテスト履歴をAtCoder APIから取得しDBにキャッシュ
     fetch_and_cache_ac_submissions.py  AC提出をkenkoooo APIから取得しDBにキャッシュ
     get_ac_count.py                    総AC数を返す (DBキャッシュ優先、なければAPI)
@@ -57,6 +58,7 @@ app/
     --- ABC コンテスト ---
     get_abc_standings.py             指定ABCの結果を取得し、登録ユーザーをrated/unratedに分類
     fetch_abc_standings_if_ready.py  ABC結果がレート確定済みか判定し、確定時のみ結果を返す
+    build_abc_standings.py           results/jsonから登録ユーザーを抽出 (上2つの共通処理。参加者の提出キャッシュを更新してからAC数を数える)
     get_contest_ac_count.py          コンテスト中のAC数をac_submissions_cacheからカウント
     get_contest_end_time.py          contest_historyからコンテスト終了時刻を取得
     get_prev_contest.py              最後に処理したABCコンテスト番号を取得
@@ -86,6 +88,8 @@ app/
 | atcoder_name | str | AtCoderユーザー名 |
 
 表示内容: 通算AC数、今日のAC数、今日の獲得点数
+
+登録済みユーザーの場合は、表示前に提出キャッシュを差分更新する。
 
 ### /user_register
 
@@ -129,6 +133,8 @@ AtCoderユーザーをBotに登録する。
 
 ソート: レート変化(降順) -> AC数(降順)
 
+表示前に全登録ユーザーのキャッシュを差分更新する (登録人数 × 1〜3秒ほどかかる)。
+
 グラフ:
 - 7日以内: 散布図 (横軸: AC数, 縦軸: レート変化)
 - 8日以上: 折れ線グラフ (横軸: AC数, 縦軸: レート)
@@ -154,6 +160,7 @@ AtCoderユーザーをBotに登録する。
 表示内容: 順位、コンテスト中のAC数、パフォーマンス、レート変化、rated/unrated分類
 
 コンテスト中のAC数は ac_submissions_cache から算出する (コンテスト終了時刻 - 100分 の範囲)。
+終了時刻は results/json の EndTime を使い、集計前に参加者の提出キャッシュを差分更新する。
 
 ---
 
@@ -176,7 +183,8 @@ ADMIN_IDのユーザーが特定のメッセージを送信すると、事前定
 
 ### weekly_ranking_post
 
-毎週月曜 0:15 JST に実行。
+毎週月曜 0:15 JST に実行。daily_update より前に走るため、集計前に全登録ユーザーのキャッシュを差分更新する。
+同じ日に二重に実行されても週番号が進まないよう、`bot_state` の `weekly_last_posted` に投稿日を記録する。
 
 1. 直近1週間のAC数・点数・レート変化のランキングをテキストで投稿
 2. 12週サイクルの累積折れ線グラフを2枚投稿
@@ -187,7 +195,9 @@ ADMIN_IDのユーザーが特定のメッセージを送信すると、事前定
 
 ### auto_abc_ranking
 
-1時間ごとに実行。前回処理したABC番号 (初期値: 454) の次のコンテスト結果をAtCoder APIで確認し、レート確定済みであれば登録ユーザーのランキングを自動投稿する。投稿後は `prev_contest` を更新して二重投稿を防止する。
+1時間ごとに実行。前回処理したABC番号 (`prev_contest`) の次のコンテスト結果をAtCoder APIで確認し、レート確定済みであれば登録ユーザーのランキングを自動投稿する。投稿に成功してから `prev_contest` を更新する (送信に失敗した場合は次の実行で再試行)。
+
+`prev_contest` が未設定の場合は、kenkoooo のコンテスト一覧から直近に終了したABC番号を取得して初期化する。取得できなかった場合は初期化せず次の実行で再試行する (固定値で初期化すると古いABCが連投されるため)。
 
 ---
 
@@ -291,7 +301,8 @@ Bot全体のキーバリューストア。現在は `prev_contest` の管理に�
 
 | エンドポイント | 用途 | 呼び出し元 |
 |---|---|---|
-| `atcoder.jp/users/{user}/history/json` | コンテスト履歴・レート取得 | fetch_and_cache_contest_history, get_latest_rating, get_latest_rating_nofstring |
+| `atcoder.jp/users/{user}` | ユーザー存在確認 (存在しなければ404) | atcoder_user_exists |
+| `atcoder.jp/users/{user}/history/json` | コンテスト履歴・レート取得 (存在しないユーザーでも 200 [] を返すため存在確認には使えない) | fetch_and_cache_contest_history, get_latest_rating, get_latest_rating_nofstring |
 | `atcoder.jp/contests/{id}/results/json` | コンテスト結果 (順位・パフォーマンス) | get_abc_standings, fetch_abc_standings_if_ready |
 
 注意事項:
@@ -326,7 +337,7 @@ Bot全体のキーバリューストア。現在は `prev_contest` の管理に�
 
 ```
 /user_register
-  -> get_latest_rating_nofstring()   ... AtCoder APIでユーザー存在確認
+  -> atcoder_user_exists()           ... AtCoderユーザーページでユーザー存在確認
   -> register_user()                 ... usersテーブルにINSERT
   -> initial_fetch_user_data()
       -> fetch_and_cache_contest_history()  ... コンテスト履歴を全件取得しDBに保存
@@ -340,13 +351,14 @@ daily_update
   -> get_user_dict()                ... 全登録ユーザーを取得
   -> initial_fetch_user_data()      ... 各ユーザーの差分データを取得
       -> fetch_and_cache_contest_history()  ... 前回から1時間以上経過していれば再取得
-      -> fetch_and_cache_ac_submissions()   ... 前回の最終提出IDから差分取得
+      -> fetch_and_cache_ac_submissions()   ... 前回の最終提出時刻(from_second)から差分取得
 ```
 
 ### 週次ランキング投稿 (weekly_ranking_post, 毎週月曜 0:15 JST)
 
 ```
 weekly_ranking_post
+  -> refresh_users_data()           ... 全ユーザーのキャッシュを差分更新
   -> make_growth_ranking()          ... 直近7日のランキングを生成
       -> AC_fight()                 ... 各ユーザーのAC数・点数を取得
           -> count_period_ac()      ... DBキャッシュから期間AC数を集計
@@ -359,16 +371,18 @@ weekly_ranking_post
   -> Discordに投稿 (テキスト + グラフ2枚)
 ```
 
-### ABC自動ランキング (auto_abc_ranking, 毎日 1:05 JST)
+### ABC自動ランキング (auto_abc_ranking, 1時間ごと)
 
 ```
 auto_abc_ranking
-  -> get_prev_contest()                   ... 前回処理したABC番号を取得
+  -> ensure_prev_contest()                ... 前回処理したABC番号を取得 (未設定ならAPIで初期化)
   -> fetch_abc_standings_if_ready()       ... 次のABCの結果を確認
       -> AtCoder results/json API         ... レート確定済みか判定
-      -> get_contest_ac_count()           ... コンテスト中のAC数をDBから算出
-  -> set_prev_contest()                   ... ABC番号を更新
+      -> build_abc_standings()
+          -> fetch_and_cache_ac_submissions()  ... 参加者の提出キャッシュを差分更新
+          -> get_contest_ac_count()            ... コンテスト中のAC数をDBから算出
   -> Discordに投稿 (rated/unrated分類のランキング + AC数)
+  -> set_prev_contest()                   ... 投稿成功後にABC番号を更新
 ```
 
 ### 精進状況表示 (/everyone_state)
@@ -389,6 +403,7 @@ auto_abc_ranking
 | DISCORD_TOKEN | Discord Botトークン |
 | ADMIN_ID | 管理者のDiscordユーザーID |
 | RANKING_CHANNEL_ID | ランキング自動投稿先のチャンネルID |
+| LOG_CHANNEL_ID | API呼び出しログの送信先チャンネルID (省略時は従来のチャンネル) |
 | PORT | HTTPサーバーのポート番号 (デフォルト: 8000) |
 
 ---
@@ -404,6 +419,6 @@ python main.py
 1. DBの全テーブルを初期化 (init_db)
 2. スラッシュコマンドをDiscordに同期 (tree.sync)
 3. バックグラウンドタスクを開始 (daily_update, weekly_ranking_post, auto_abc_ranking)
-4. prev_contestが未設定の場合、APIから直近のABC番号を取得して初期化 (フォールバック: 455)
+4. prev_contestが未設定の場合、APIから直近のABC番号を取得して初期化 (失敗時は auto_abc_ranking で再試行)
 5. ログ出力用チャンネルを設定
 6. ヘルスチェック用HTTPサーバーをデーモンスレッドで起動
