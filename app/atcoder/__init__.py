@@ -37,6 +37,7 @@ from atcoder.create_weekly_graph import create_weekly_graph
 from atcoder.get_contest_ac_count import get_contest_ac_count
 from atcoder.get_contest_end_time import get_contest_end_time_unix
 from atcoder.get_ac_streak import get_ac_streak
+from atcoder.atcoder_user_exists import atcoder_user_exists
 
 CONTEST_CACHE_TTL = 3600
 
@@ -88,4 +89,5 @@ __all__ = [
   "get_contest_ac_count",
   "get_contest_end_time_unix",
   "get_ac_streak",
+  "atcoder_user_exists",
 ]

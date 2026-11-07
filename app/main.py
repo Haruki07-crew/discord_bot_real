@@ -380,9 +380,12 @@ async def user_register(interaction: discord.Interaction, atcoder_name: str, dis
     if exist_user:
       await interaction.followup.send(f"⚠️エラー: {atcoder_name} さんはすでに<@{exist_user[1]}>さんによって登録されています")
       return
-    check = await get_latest_rating_nofstring(atcoder_name)
-    if "存在しません" in str(check):
+    exists = await atcoder_user_exists(atcoder_name)
+    if exists is False:
       await interaction.followup.send(f"⚠️エラー : {atcoder_name}は存在しません")
+      return
+    if exists is None:
+      await interaction.followup.send(f"⚠️エラー : AtCoderに接続できませんでした。時間をおいて再度お試しください")
       return
     register_user(atcoder_name, discord_name, discord_id, register_id, DB_FILE)
     await interaction.followup.send(
