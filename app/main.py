@@ -28,13 +28,7 @@ JST = datetime.timezone(datetime.timedelta(hours=9))
 async def daily_update():
   print("[daily_update] Starting daily data update...")
   users = list(get_user_dict(DB_FILE).keys())
-  for atcoder_name in users:
-    try:
-      await initial_fetch_user_data(atcoder_name, DB_FILE)
-      print(f"[daily_update] Updated {atcoder_name}")
-    except Exception as e:
-      print(f"[daily_update] Error updating {atcoder_name}: {e}")
-    await asyncio.sleep(1.5)
+  await refresh_users_data(users, DB_FILE, interval=1.5)
   print("[daily_update] Daily update complete")
 
 
@@ -57,11 +51,20 @@ async def weekly_ranking_post():
     print("[weekly_ranking_post] Channel not found, skipping")
     return
 
+  today_str = now.strftime("%Y-%m-%d")
+  if get_weekly_last_posted(DB_FILE) == today_str:
+    print("[weekly_ranking_post] Already posted today, skipping")
+    return
+
   try:
     user = get_user_dict(DB_FILE)
     if not user:
       print("[weekly_ranking_post] No registered users, skipping")
       return
+
+    # daily_update(1:00)より前に走るので、先にキャッシュを更新する
+    # (しないと日曜日のACがどの週にも集計されない)
+    await refresh_users_data(list(user), DB_FILE)
 
     # 今週のデータを取得 (直近7日)
     ranking_data = await make_growth_ranking(user, 7, DB_FILE)
@@ -69,8 +72,9 @@ async def weekly_ranking_post():
       print("[weekly_ranking_post] No ranking data, skipping")
       return
 
-    # 週次サイクルを進める
+    # 週次サイクルを進める (同じ日に二重に進めないよう、進めた直後に記録する)
     cycle_id, week_number = advance_weekly_cycle(DB_FILE)
+    set_weekly_last_posted(today_str, DB_FILE)
     print(f"[weekly_ranking_post] cycle={cycle_id}, week={week_number}")
 
     # スナップショットを保存
@@ -330,6 +334,9 @@ async def on_message(message):
 async def rating_command(interaction: discord.Interaction, atcoder_name: str):
   await interaction.response.defer()
   try:
+    # 登録済みユーザーならキャッシュを差分更新してから集計する (しないと今日のACが反映されない)
+    if atcoder_name in get_user_dict(DB_FILE):
+      await refresh_users_data([atcoder_name], DB_FILE)
     ac_sum = await get_ac_count(atcoder_name, DB_FILE)
     ac_daily = await count_period_ac(atcoder_name, 1, DB_FILE)
     problems_url = f"https://kenkoooo.com/atcoder/#/user/{atcoder_name}?userPageTab=Progress+Charts"
@@ -478,6 +485,7 @@ async def diligence_growth(interaction: discord.Interaction, period: app_command
     user = get_user_dict(DB_FILE)
     day = period.value
     label = period.name
+    await refresh_users_data(list(user), DB_FILE)
     ranking_data = await make_growth_ranking(user, day, DB_FILE)
 
     if not ranking_data:
@@ -538,6 +546,7 @@ async def diligence_growth_point(interaction: discord.Interaction, period: app_c
     user = get_user_dict(DB_FILE)
     day = period.value
     label = period.name
+    await refresh_users_data(list(user), DB_FILE)
     ranking_data = await make_growth_ranking(user, day, DB_FILE)
 
     if not ranking_data:

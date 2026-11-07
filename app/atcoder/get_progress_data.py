@@ -1,13 +1,10 @@
 import sqlite3
-from datetime import datetime, timezone, timedelta
 
 async def get_progress_data(atcoder_name, days, db_file):
   from atcoder.parse_atcoder_time import parse_atcoder_time
+  from atcoder.count_period_ac import get_period_start_unix
   try:
-    time_diff = timezone(timedelta(hours=9))
-    now = datetime.now(time_diff)
-    period_start = now - timedelta(days=days)
-    period_start_unix = int(period_start.timestamp())
+    period_start_unix = get_period_start_unix(days)
 
     with sqlite3.connect(db_file) as conn:
       cursor = conn.cursor()

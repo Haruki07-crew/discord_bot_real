@@ -13,7 +13,7 @@ from atcoder.init_progress_tables import init_progress_tables
 from atcoder.parse_atcoder_time import parse_atcoder_time
 from atcoder.fetch_and_cache_contest_history import fetch_and_cache_contest_history
 from atcoder.fetch_and_cache_ac_submissions import fetch_and_cache_ac_submissions
-from atcoder.initial_fetch_user_data import initial_fetch_user_data
+from atcoder.initial_fetch_user_data import initial_fetch_user_data, refresh_users_data
 from atcoder.get_progress_data import get_progress_data
 from atcoder.create_progress_graph import create_progress_graph
 from atcoder.get_ac_rate_change_data import get_ac_rate_change_data
@@ -32,7 +32,7 @@ from atcoder.get_all_users_with_discord_id import get_all_users_with_discord_id
 from atcoder.is_contest_auto_posted import is_contest_auto_posted
 from atcoder.mark_contest_auto_posted import mark_contest_auto_posted
 from atcoder.get_latest_ended_abc_number import get_latest_ended_abc_number
-from atcoder.weekly_cycle_helpers import get_weekly_cycle_state, advance_weekly_cycle, save_weekly_snapshot, get_weekly_snapshots
+from atcoder.weekly_cycle_helpers import get_weekly_cycle_state, advance_weekly_cycle, save_weekly_snapshot, get_weekly_snapshots, get_weekly_last_posted, set_weekly_last_posted
 from atcoder.create_weekly_graph import create_weekly_graph
 from atcoder.get_contest_ac_count import get_contest_ac_count
 from atcoder.get_contest_end_time import get_contest_end_time_unix
@@ -62,6 +62,7 @@ __all__ = [
   "fetch_and_cache_contest_history",
   "fetch_and_cache_ac_submissions",
   "initial_fetch_user_data",
+  "refresh_users_data",
   "get_progress_data",
   "create_progress_graph",
   "get_ac_rate_change_data",
@@ -85,6 +86,8 @@ __all__ = [
   "advance_weekly_cycle",
   "save_weekly_snapshot",
   "get_weekly_snapshots",
+  "get_weekly_last_posted",
+  "set_weekly_last_posted",
   "create_weekly_graph",
   "get_contest_ac_count",
   "get_contest_end_time_unix",
