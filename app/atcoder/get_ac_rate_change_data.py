@@ -1,6 +1,7 @@
 import sqlite3
 
-async def get_ac_rate_change_data(user_dict, days, db_file):
+async def get_ac_rate_change_data(user_dict, days, db_file, end_unix=None):
+  """end_unix を指定するとその時刻以降に終わったコンテストは数えない (週次集計で次の週と二重に数えないため)"""
   from atcoder.parse_atcoder_time import parse_atcoder_time
   from atcoder.count_period_ac import get_period_start_unix
   period_start_unix = get_period_start_unix(days)
@@ -22,7 +23,7 @@ async def get_ac_rate_change_data(user_dict, days, db_file):
       first_old_rating = None
       for end_time_str, new_rating, old_rating in rows:
         end_dt = parse_atcoder_time(end_time_str)
-        if end_dt is None:
+        if end_dt is None or (end_unix is not None and end_dt.timestamp() >= end_unix):
           continue
         if end_dt.timestamp() < period_start_unix:
           initial_rating = new_rating

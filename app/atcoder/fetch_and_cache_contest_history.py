@@ -5,9 +5,11 @@ from datetime import datetime, timezone, timedelta
 import discord_logger
 
 JST = timezone(timedelta(hours=9))
-CONTEST_CACHE_TTL = 3600
+# レートはコンテスト終了から少し遅れて確定する。長くキャッシュすると確定直後の集計に反映されないので短めにする
+CONTEST_CACHE_TTL = 600
 
-async def fetch_and_cache_contest_history(atcoder_name, db_file):
+async def fetch_and_cache_contest_history(atcoder_name, db_file, force=False):
+  """force=True ならキャッシュの有効期限に関係なく再取得する (週次集計の直前など)"""
   now = time.time()
 
   with sqlite3.connect(db_file) as conn:
@@ -18,7 +20,7 @@ async def fetch_and_cache_contest_history(atcoder_name, db_file):
     )
     meta = cursor.fetchone()
 
-    if meta and (now - meta[0]) < CONTEST_CACHE_TTL:
+    if not force and meta and meta[0] and (now - meta[0]) < CONTEST_CACHE_TTL:
       cursor.execute("""
         SELECT contest_screen_name, end_time, new_rating, old_rating
         FROM contest_history WHERE atcoder_name = ?
