@@ -43,9 +43,12 @@ async def fetch_and_cache_ac_submissions(atcoder_name, db_file):
       r = cursor.fetchone()
       from_epoch = r[0] if r and r[0] else 0
 
+  # kenkoooo API は from_id を無視するので from_second だけでページ送りする。
+  # from_second は「その秒を含む」ため直前の最終提出が再取得されるが、INSERT OR IGNORE で重複排除される。
   new_submissions = []
   last_submission_id = from_id
   last_epoch_second = from_epoch
+  fetch_ok = False
   timeout = aiohttp.ClientTimeout(total=30, connect=10, sock_read=20)
   async with aiohttp.ClientSession() as session:
     page = 0
@@ -54,8 +57,6 @@ async def fetch_and_cache_ac_submissions(atcoder_name, db_file):
         f"https://kenkoooo.com/atcoder/atcoder-api/v3/user/submissions"
         f"?user={atcoder_name}&from_second={last_epoch_second}"
       )
-      if last_submission_id:
-        url += f"&from_id={last_submission_id}"
 
       await discord_logger.log_api(f"APIを叩いた: AC提出取得 (fetch_and_cache_ac_submissions) [{atcoder_name}] page={page}")
       try:
@@ -63,9 +64,13 @@ async def fetch_and_cache_ac_submissions(atcoder_name, db_file):
           resp.raise_for_status()
           data = await resp.json(content_type=None)
       except Exception as e:
+        print(f"[fetch_and_cache_ac_submissions] {atcoder_name}: {type(e).__name__}: {e}")
         break
 
-      if not isinstance(data, list) or not data:
+      if not isinstance(data, list):
+        break
+      fetch_ok = True
+      if not data:
         break
 
       for sub in data:
@@ -73,25 +78,33 @@ async def fetch_and_cache_ac_submissions(atcoder_name, db_file):
           new_submissions.append((atcoder_name, sub["id"], sub["problem_id"], sub["epoch_second"], sub.get("point", 0)))
 
       last_submission_id = data[-1]["id"]
-      last_epoch_second = data[-1]["epoch_second"]
       page += 1
       if len(data) < 500:
+        last_epoch_second = data[-1]["epoch_second"]
         break
+      next_epoch = data[-1]["epoch_second"]
+      # 同一秒に500件以上ある場合でも先へ進めるようにする
+      last_epoch_second = next_epoch if next_epoch > last_epoch_second else last_epoch_second + 1
       await asyncio.sleep(0.8)
 
-  if new_submissions or (last_submission_id and last_submission_id != from_id):
-    with sqlite3.connect(db_file) as conn:
-      cursor = conn.cursor()
-      if new_submissions:
-        cursor.executemany("""
-          INSERT OR IGNORE INTO ac_submissions_cache
-          (atcoder_name, submission_id, problem_id, epoch_second, point)
-          VALUES (?, ?, ?, ?, ?)
-        """, new_submissions)
-      if last_submission_id and last_submission_id != from_id:
-        cursor.execute("""
-          UPDATE update_bookmark
-          SET submission_last_id = ?, submission_last_fetch = ?, submission_cache_from = ?
-          WHERE atcoder_name = ?
-        """, (last_submission_id, now, last_epoch_second, atcoder_name))
-      conn.commit()
+  with sqlite3.connect(db_file) as conn:
+    cursor = conn.cursor()
+    if new_submissions:
+      cursor.executemany("""
+        INSERT OR IGNORE INTO ac_submissions_cache
+        (atcoder_name, submission_id, problem_id, epoch_second, point)
+        VALUES (?, ?, ?, ?, ?)
+      """, new_submissions)
+    if last_submission_id and last_submission_id != from_id:
+      cursor.execute("""
+        UPDATE update_bookmark
+        SET submission_last_id = ?, submission_cache_from = ?
+        WHERE atcoder_name = ?
+      """, (last_submission_id, last_epoch_second, atcoder_name))
+    if fetch_ok:
+      # 新しい提出が無くても取得時刻は記録し、60秒以内の連続呼び出しでAPIを叩かないようにする
+      cursor.execute(
+        "UPDATE update_bookmark SET submission_last_fetch = ? WHERE atcoder_name = ?",
+        (now, atcoder_name)
+      )
+    conn.commit()

@@ -35,16 +35,16 @@ async def count_period_ac(atcoder_name, day, db_file="database.db"):
     ac_point_sum = sum(point or 0 for _, point in rows)
     return [ac_count, math.ceil(ac_point_sum)]
 
+  # kenkoooo API は from_id を無視するため、from_second を進めてページ送りする
+  # (from_second を固定したままだと500件以上ある場合に同じページを取り続けてしまう)
   s = set()
   ac_point_sum = 0
-  last_submission_id = None
+  from_second = period_start_unix
   page = 0
   timeout = aiohttp.ClientTimeout(total=30, connect=10, sock_read=20)
   async with aiohttp.ClientSession() as session:
-    while True:
-      url = f"https://kenkoooo.com/atcoder/atcoder-api/v3/user/submissions?user={atcoder_name}&from_second={period_start_unix}"
-      if last_submission_id:
-        url += f"&from_id={last_submission_id + 1}"
+    while page < 300:
+      url = f"https://kenkoooo.com/atcoder/atcoder-api/v3/user/submissions?user={atcoder_name}&from_second={from_second}"
       await discord_logger.log_api(f"APIを叩いた: 期間AC数取得 (count_period_ac) [{atcoder_name}] page={page}")
       try:
         async with session.get(url, timeout=timeout) as resp:
@@ -59,10 +59,11 @@ async def count_period_ac(atcoder_name, day, db_file="database.db"):
           problem_id = submission["problem_id"]
           if "ahc" not in problem_id and problem_id not in s:
             s.add(problem_id)
-            ac_point_sum += submission["point"]
-        last_submission_id = submission["id"]
+            ac_point_sum += submission.get("point", 0) or 0
       page += 1
       if len(data) < 500:
         break
+      next_from = data[-1]["epoch_second"]
+      from_second = next_from if next_from > from_second else from_second + 1
       await asyncio.sleep(0.8)
   return [len(s), math.ceil(ac_point_sum)]
