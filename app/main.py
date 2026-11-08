@@ -807,12 +807,18 @@ async def streak_reminder_task():
     if get_state("streak_reminder_last", DB_FILE) == today:
       return
     set_state("streak_reminder_last", today, DB_FILE)
+    failure = None
     for discord_id, atcoder_name in get_notification_targets("streak", DB_FILE):
-      await refresh_users_data([atcoder_name], DB_FILE)  # 夜のACを見落として誤って通知しないように
-      streak = get_ac_streak(atcoder_name, DB_FILE)
-      today_ac = (await count_period_ac(atcoder_name, 1, DB_FILE))[0]
-      if streak >= 1 and today_ac == 0:
-        await send_dm(discord_id, f"🔥 {atcoder_name} さん、今日はまだACしていません。今日ACしないと連続{streak}日の記録が途切れます！")
+      try:  # 1人の失敗で残りの人に届かなくならないように
+        await refresh_users_data([atcoder_name], DB_FILE)  # 夜のACを見落として誤って通知しないように
+        streak = get_ac_streak(atcoder_name, DB_FILE)
+        today_ac = (await count_period_ac(atcoder_name, 1, DB_FILE))[0]
+        if streak >= 1 and today_ac == 0:
+          await send_dm(discord_id, f"🔥 {atcoder_name} さん、今日はまだACしていません。今日ACしないと連続{streak}日の記録が途切れます！")
+      except Exception as e:
+        failure = alerts.record_error("streak_reminder_task", e)
+    if failure:
+      await alerts.notify_admin("streak_reminder_task", f"連続ACのリマインドで一部失敗\n{failure}")
   except Exception as e:
     summary = alerts.record_error("streak_reminder_task", e)
     await alerts.notify_admin("streak_reminder_task", f"連続ACのリマインドで例外\n{summary}")
@@ -856,8 +862,14 @@ async def weekly_review_task():
       return
     models, _problems = await get_problem_data()
     week_end_unix = int(datetime.datetime(now.year, now.month, now.day, tzinfo=JST).timestamp())
+    failure = None
     for discord_id, atcoder_name in targets:
-      await send_dm(discord_id, await build_weekly_review(atcoder_name, week_end_unix, models))
+      try:  # 1人の失敗で残りの人に届かなくならないように
+        await send_dm(discord_id, await build_weekly_review(atcoder_name, week_end_unix, models))
+      except Exception as e:
+        failure = alerts.record_error("weekly_review_task", e)
+    if failure:
+      await alerts.notify_admin("weekly_review_task", f"週次ふり返りで一部失敗\n{failure}")
   except Exception as e:
     summary = alerts.record_error("weekly_review_task", e)
     await alerts.notify_admin("weekly_review_task", f"週次ふり返りで例外\n{summary}")
@@ -1194,7 +1206,7 @@ async def user_list(interaction: discord.Interaction):
 async def diligence_growth(interaction: discord.Interaction, period: app_commands.Choice[int], color: app_commands.Choice[str] = None):
   await interaction.response.defer()
   try:
-    user = filter_by_color(get_user_dict(DB_FILE), color)
+    user = await asyncio.to_thread(filter_by_color, get_user_dict(DB_FILE), color)  # 全員分の DB 読み込みでイベントループを止めない
     day = period.value
     label = f"{period.name} / {color.name}" if color else period.name
     ranking_data = await make_growth_ranking(user, day, DB_FILE)
@@ -1240,7 +1252,7 @@ async def diligence_growth(interaction: discord.Interaction, period: app_command
 async def diligence_growth_point(interaction: discord.Interaction, period: app_commands.Choice[int], color: app_commands.Choice[str] = None):
   await interaction.response.defer()
   try:
-    user = filter_by_color(get_user_dict(DB_FILE), color)
+    user = await asyncio.to_thread(filter_by_color, get_user_dict(DB_FILE), color)  # 全員分の DB 読み込みでイベントループを止めない
     day = period.value
     label = f"{period.name} / {color.name}" if color else period.name
     ranking_data = await make_growth_ranking(user, day, DB_FILE)
@@ -1424,15 +1436,17 @@ async def user_link(interaction: discord.Interaction, atcoder_name: str, member:
 async def diligence_score(interaction: discord.Interaction, period: app_commands.Choice[int], color: app_commands.Choice[str] = None):
   await interaction.response.defer()
   try:
-    user = filter_by_color(get_user_dict(DB_FILE), color)
+    user = await asyncio.to_thread(filter_by_color, get_user_dict(DB_FILE), color)  # 全員分の DB 読み込みでイベントループを止めない
     if not user:
       await interaction.edit_original_response(content="対象のユーザーがいません")
       return
     models, _problems = await get_problem_data()
-    rows = sorted(
-      ((get_period_score(name, period.value, DB_FILE, models), name, discord_name) for name, discord_name in user.items()),
-      key=lambda r: r[0], reverse=True,
-    )
+    def score_rows():
+      return sorted(
+        ((get_period_score(name, period.value, DB_FILE, models), name, discord_name) for name, discord_name in user.items()),
+        key=lambda r: r[0], reverse=True,
+      )
+    rows = await asyncio.to_thread(score_rows)
     ranking, fields = [], []
     place, previous = 0, None
     for i, (score, name, discord_name) in enumerate(rows):

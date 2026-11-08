@@ -49,6 +49,11 @@ def link_discord_account(atcoder_name, discord_id, db_file):
       "UPDATE users SET discord_id = ?, register_id = ? WHERE atcoder_name = ? COLLATE NOCASE",
       (discord_id, discord_id, atcoder_name),
     )
+    # 別の人が受け取っていた通知は引き継がない (前の持ち主に DM が届き続けないように)
+    conn.execute(
+      "DELETE FROM notification_prefs WHERE atcoder_name = ? COLLATE NOCASE AND discord_id != ?",
+      (atcoder_name, discord_id),
+    )
     return cur.rowcount > 0
 
 

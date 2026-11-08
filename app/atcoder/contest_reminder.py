@@ -1,4 +1,5 @@
 """ABC の開始前リマインド。kenkoooo の一覧には未来のコンテストが無いので atcoder.jp の予定表を読む。"""
+import html
 import re
 import time
 from datetime import datetime
@@ -25,7 +26,7 @@ def parse_upcoming_abc(page):
     when, abc = _TIME_RE.search(row), _ABC_RE.search(row)
     if when and abc:
       start = datetime.strptime(when.group(1).strip(), "%Y-%m-%d %H:%M:%S%z")
-      contests.append({"id": abc.group(1), "title": abc.group(2), "start": int(start.timestamp())})
+      contests.append({"id": abc.group(1), "title": html.unescape(abc.group(2)), "start": int(start.timestamp())})
   return contests
 
 

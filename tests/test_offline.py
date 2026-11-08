@@ -783,6 +783,35 @@ class TestEngagement(Base):
     self.assertEqual(self.dms[0][0], 5)
     self.assertIn("連続1日", self.dms[0][1])
 
+  def test_streak_reminder_survives_one_user_failure(self):
+    t0 = today_start()
+    for i, (uid, name) in enumerate(((5, "alice"), (6, "bob"))):
+      self.ns["set_notification"](uid, name, "streak", True, self.db)
+      add_ac(self.db, name, i + 1, "abc1_a", (t0 - _dt.timedelta(days=1)).timestamp())
+    async def refresh(names, _db):
+      if names == ["alice"]:
+        raise RuntimeError("boom")
+    self.ns["refresh_users_data"] = refresh
+    async def notify(*_args, **_kwargs):
+      return None
+    self.addCleanup(setattr, self.ns["alerts"], "notify_admin", self.ns["alerts"].notify_admin)
+    self.ns["alerts"].notify_admin = notify
+    self.run_async(self.ns["streak_reminder_task"].coro())
+    self.assertEqual([d[0] for d in self.dms], [6])
+
+  def test_relink_drops_previous_owner_notifications(self):
+    self.ns["set_notification"](5, "alice", "streak", True, self.db)
+    self.assertTrue(self.ns["link_discord_account"]("alice", 5, self.db))
+    self.assertEqual(self.ns["get_notification_targets"]("streak", self.db), [(5, "alice")])
+    self.assertTrue(self.ns["link_discord_account"]("ALICE", 7, self.db))
+    self.assertEqual(self.ns["get_notification_targets"]("streak", self.db), [])
+
+  def test_parse_unescapes_title(self):
+    from atcoder.contest_reminder import parse_upcoming_abc
+    page = ('<div id="contest-table-upcoming"><table><tr><td><time>2026-11-14 21:00:00+0900</time></td>'
+            '<td><a href="/contests/abc484">A &amp; B Contest</a></td></tr></table></div>')
+    self.assertEqual(parse_upcoming_abc(page)[0]["title"], "A & B Contest")
+
   def test_no_streak_reminder_after_ac_today(self):
     self.ns["set_notification"](5, "alice", "streak", True, self.db)
     t0 = today_start()
