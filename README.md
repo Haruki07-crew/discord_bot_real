@@ -83,6 +83,7 @@ LOG_CHANNEL_ID=123456789012345678
 | `ADMIN_ID` | ✅ 必須 | 管理者のユーザーID。エラーの通知が届き、他人の登録を解除できるようになる |
 | `RANKING_CHANNEL_ID` | おすすめ | ABC結果・週次レポートの投稿先。**未設定だと自動投稿はすべて行われない** |
 | `LOG_CHANNEL_ID` | 任意 | APIを呼んだ記録を流すチャンネル。サーバー内に無いIDだとログは送られない |
+| `REQUIRE_ATCODER_VERIFICATION` | 任意 | `true` にすると、管理者以外の登録で AtCoder アカウントの本人確認を求める (初期値 `false`) |
 | `DB_PATH` | 任意 | データベースの保存場所。未設定なら起動したフォルダの `database.db` |
 | `PORT` | 任意 | 動作確認用 HTTP サーバーのポート (初期値 `8000`) |
 
@@ -138,9 +139,14 @@ docker compose logs -f     # "activate the bot  now!!!!" が出れば成功
 | コマンド | 説明 |
 |---|---|
 | `/user_register atcoder_name [discord_name]` | 自分の AtCoder アカウントを登録する。`discord_name` はランキングに表示される名前 (省略すると Discord の表示名) |
+| `/user_verify` | 本人確認が有効なときに使う。所属欄に確認コードを書いたあとに実行すると、登録が完了する |
 | `/user_unregister atcoder_name` | 登録を解除する。登録した本人か管理者だけが実行できる |
 | `/user_list` | 登録メンバーと現在のレートの一覧を表示する |
 
+- `REQUIRE_ATCODER_VERIFICATION=true` のときは、他人のアカウントを登録できないように本人確認をします。
+  1. `/user_register` を実行すると、確認コード (例: `atcbot-1a2b3c4d`) が表示される
+  2. AtCoder の [ユーザー情報の変更](https://atcoder.jp/settings) で **所属** にそのコードを書いて保存する
+  3. 1時間以内に `/user_verify` を実行すると登録が完了する (終わったら所属は元に戻してよい)
 - 登録できるのは **1人1アカウント** です (管理者は何人でも登録できます)。登録し直すときは `/user_unregister` で解除してから登録します。
 - 登録すると、その人の過去の提出をすべて取り込みます。提出が多い人は数分かかります。
 - AtCoder のユーザー名は、大文字と小文字を区別しません (`Hanaosi` と `hanaosi` は同じ人として扱います)。

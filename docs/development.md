@@ -28,6 +28,7 @@ app/
     get_user_dict.py       全ユーザーの {atcoder_name: discord_name} 辞書を返す
     get_registered_user.py 指定ユーザーの登録情報を返す (二重登録チェック用)
     get_register_id.py     登録者IDを返す (解除権限チェック用)
+    verification.py        本人確認 (確認コードの発行・期限管理、プロフィールの所属欄にコードがあるかの確認)
     get_registered_by_discord_id.py  その Discord ユーザーが自分で登録した AtCoder 名を返す (1人1アカウント制限用)
 
     --- データ取得・キャッシュ ---
@@ -109,6 +110,11 @@ AtCoderユーザーをBotに登録する。管理者以外は1人1アカウン�
 | discord_name | str (省略可) | ランキングに表示する名前。省略時は Discord の表示名 |
 
 処理: AtCoder APIでユーザー存在確認 -> DB登録 -> コンテスト履歴・AC提出を全件取得してキャッシュ
+
+### /user_verify
+
+`REQUIRE_ATCODER_VERIFICATION=true` のとき、`/user_register` (管理者以外) は登録せずに確認コードを発行し、`pending_verifications` に保存する (有効期限1時間)。
+`/user_verify` は `atcoder.jp/users/{name}` の所属欄 (Affiliation / 所属) にコードがあれば登録を完了する。
 
 ### /user_unregister
 

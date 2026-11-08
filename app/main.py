@@ -812,36 +812,53 @@ async def rating_command(interaction: discord.Interaction, atcoder_name: str):
     await report_command_error(interaction, "syozin", e)
 
 
+## @brief 登録できるか確認する。できなければ理由のメッセージ、できれば None を返す (await を含まない)
+def registration_problem(interaction, atcoder_name):
+  if not is_admin(interaction.user.id):
+    mine = get_registered_by_discord_id(interaction.user.id, DB_FILE)
+    if mine:
+      return (f"⚠️エラー : すでに {mine} を登録しています。登録できるのは1人1アカウントです。"
+              f"変更するときは `/user_unregister` で解除してから登録し直してください")
+  exist_user = get_registered_user(atcoder_name, DB_FILE)
+  if exist_user:
+    return f"⚠️エラー: {atcoder_name} さんはすでに<@{exist_user[1]}>さんによって登録されています"
+  return None
+
+
+## @brief 登録を確定して提出履歴を取り込む (/user_register と /user_verify の共通処理)
+async def complete_registration(interaction, atcoder_name, discord_name):
+  # 直前に確認し直す。ここから INSERT までは await を挟まないので、同時に実行されても二重登録にならない
+  problem = registration_problem(interaction, atcoder_name)
+  if problem:
+    await interaction.followup.send(problem, allowed_mentions=discord.AllowedMentions.none())
+    return
+  register_user(atcoder_name, discord_name, interaction.user.id, interaction.user.id, DB_FILE)
+  await interaction.followup.send(
+    f"{discord_name} さんを {atcoder_name} で登録しました\n"
+    f"提出履歴を取得中です...（提出数が多い場合は数分かかります）"
+  )
+  await initial_fetch_user_data(atcoder_name, DB_FILE)
+  await interaction.followup.send(f"✅ {atcoder_name} のデータ取得が完了しました")
+
+
 ## @brief ユーザーをDBに登録するコマンド
-## @details AtCoderの存在確認後にDBへ登録する。既登録の場合はエラーを返す。
-## @param interaction Discordのインタラクション
+## @details AtCoderの存在確認後にDBへ登録する。管理者以外は1人1アカウントまで。
+##          REQUIRE_ATCODER_VERIFICATION が有効なら、管理者以外は確認コードを発行して /user_verify を待つ。
 ## @param atcoder_name 登録するAtCoderユーザー名
 ## @param discord_name ランキングに表示する名前 (省略時は Discord の表示名)
-## @details 管理者以外は、自分の AtCoder アカウントを1つだけ登録できる (他人の登録やいたずらでの大量登録を防ぐ)
 @tree.command(name = "user_register", description="自分のAtCoderアカウントを登録します")
 @app_commands.describe(atcoder_name="AtCoderのユーザー名", discord_name="ランキングに表示する名前 (省略するとDiscordの表示名)")
 async def user_register(interaction: discord.Interaction, atcoder_name: str, discord_name: str = None):
   await interaction.response.defer()
   try:
-    register_id = interaction.user.id
-    discord_id = interaction.user.id
     if not discord_name:
       discord_name = getattr(interaction.user, "display_name", None) or str(interaction.user)
-
     if not is_valid_atcoder_name(atcoder_name):
       await interaction.followup.send(f"⚠️エラー : {atcoder_name}は存在しません")
       return
-    if not is_admin(interaction.user.id):
-      mine = get_registered_by_discord_id(interaction.user.id, DB_FILE)
-      if mine:
-        await interaction.followup.send(
-          f"⚠️エラー : すでに {mine} を登録しています。登録できるのは1人1アカウントです。"
-          f"変更するときは `/user_unregister` で解除してから登録し直してください"
-        )
-        return
-    exist_user = get_registered_user(atcoder_name, DB_FILE)
-    if exist_user:
-      await interaction.followup.send(f"⚠️エラー: {atcoder_name} さんはすでに<@{exist_user[1]}>さんによって登録されています")
+    problem = registration_problem(interaction, atcoder_name)
+    if problem:
+      await interaction.followup.send(problem, allowed_mentions=discord.AllowedMentions.none())
       return
     exists = await atcoder_user_exists(atcoder_name)
     if exists is False:
@@ -850,24 +867,45 @@ async def user_register(interaction: discord.Interaction, atcoder_name: str, dis
     if exists is None:
       await interaction.followup.send(f"⚠️エラー : AtCoderに接続できませんでした。時間をおいて再度お試しください")
       return
-    # 存在確認を待っている間に同じユーザーが登録されていないか確認し直す
-    # (ここから INSERT までは await を挟まないので、同時に実行されても二重登録にならない)
-    exist_user = get_registered_user(atcoder_name, DB_FILE)
-    if not exist_user and not is_admin(interaction.user.id) and get_registered_by_discord_id(interaction.user.id, DB_FILE):
-      await interaction.followup.send("⚠️エラー : 登録できるのは1人1アカウントです")
+
+    if config.REQUIRE_ATCODER_VERIFICATION and not is_admin(interaction.user.id):
+      code = create_pending_verification(interaction.user.id, atcoder_name, discord_name, DB_FILE)
+      await interaction.followup.send(
+        f"🔐 **{atcoder_name}** があなたのアカウントか確認します。\n"
+        f"1. AtCoder の [ユーザー情報の変更](https://atcoder.jp/settings) を開き、**所属** に `{code}` を書いて保存する\n"
+        f"2. 1時間以内に `/user_verify` を実行する\n"
+        f"確認が終わったら、所属は元に戻して大丈夫です。"
+      )
       return
-    if exist_user:
-      await interaction.followup.send(f"⚠️エラー: {atcoder_name} さんはすでに<@{exist_user[1]}>さんによって登録されています")
-      return
-    register_user(atcoder_name, discord_name, discord_id, register_id, DB_FILE)
-    await interaction.followup.send(
-      f"{discord_name} さんを {atcoder_name} で登録しました\n"
-      f"提出履歴を取得中です...（提出数が多い場合は数分かかります）"
-    )
-    await initial_fetch_user_data(atcoder_name, DB_FILE)
-    await interaction.followup.send(f"✅ {atcoder_name} のデータ取得が完了しました")
+
+    await complete_registration(interaction, atcoder_name, discord_name)
   except Exception as e:
     await report_command_error(interaction, "user_register", e, use_followup=True)
+
+
+## @brief /user_register で発行した確認コードが AtCoder の所属欄にあるか確かめ、登録を完了するコマンド
+@tree.command(name="user_verify", description="AtCoderの所属欄に書いた確認コードを確かめて、登録を完了します")
+async def user_verify(interaction: discord.Interaction):
+  await interaction.response.defer()
+  try:
+    pending = get_pending_verification(interaction.user.id, DB_FILE)
+    if pending is None:
+      await interaction.followup.send("確認待ちの登録がありません (有効期限は1時間です)。`/user_register` からやり直してください")
+      return
+    atcoder_name, discord_name, code = pending
+    found = await affiliation_contains(atcoder_name, code)
+    if found is None:
+      await interaction.followup.send("⚠️ AtCoderに接続できませんでした。時間をおいて再度お試しください")
+      return
+    if not found:
+      await interaction.followup.send(
+        f"⚠️ {atcoder_name} の所属欄に `{code}` が見つかりませんでした。保存したか確認して、もう一度 `/user_verify` を実行してください"
+      )
+      return
+    delete_pending_verification(interaction.user.id, DB_FILE)
+    await complete_registration(interaction, atcoder_name, discord_name)
+  except Exception as e:
+    await report_command_error(interaction, "user_verify", e, use_followup=True)
 
 
 ## @brief user_unregister の atcoder_name オートコンプリート (登録済みユーザー一覧)
