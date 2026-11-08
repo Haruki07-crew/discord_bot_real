@@ -107,30 +107,20 @@ python main.py
 ターミナルに `activate the bot  now!!!!` と出たら起動成功です。止めるときは `Ctrl + C` を押します。
 データは `app/database.db` に保存されます。
 
-#### B. Docker で動かす (サーバーやクラウドで常時稼働させる場合)
+#### B. ラズパイ5 / Azure で常時動かす (Docker Compose)
 
 ```bash
-git clone https://github.com/Haruki07-crew/discord_bot_real.git
+git clone git@github.com:Haruki07-crew/discord_bot_real.git
 cd discord_bot_real
-docker build -t atcoder-bot .
-docker run -d --name atcoder-bot --restart unless-stopped \
-  --env-file app/.env \
-  -e DB_PATH=/bot/data/database.db \
-  -v atcoder-bot-data:/bot/data \
-  -p 8000:8000 \
-  atcoder-bot
+# app/.env を置いてから
+docker compose up -d --build
+docker compose logs -f     # "activate the bot  now!!!!" が出れば成功
 ```
 
-- ログの確認: `docker logs -f atcoder-bot`
-- 停止: `docker stop atcoder-bot`、再開: `docker start atcoder-bot`
+- データは `data/database.db` に保存されるので、作り直しても消えません。毎日1:00に `data/backups/` へ14日分のバックアップを取ります。
+- OS の準備、非公開リポジトリの clone、`main` 更新時の自動反映、Azure での注意点は **[docs/deploy.md](docs/deploy.md)** にまとめています。
 
-> ⚠️ **データの保存場所に注意してください。**
-> `-v atcoder-bot-data:/bot/data` と `DB_PATH` を指定しないと、データベースはコンテナの中に作られます。
-> その場合、作り直すたびに **登録ユーザーや週次の記録がすべて消えます**。
->
-> クラウドのホスティングサービスで動かすときも同じです。永続ディスク (Volume) を用意して、`DB_PATH` をその中のパスに設定してください。
-
-ホスティングサービスがヘルスチェックを必要とする場合は、`PORT` で指定したポート (初期値 8000) の `/` に HTTP でアクセスすると `{"message": "Server is Online."}` が返ります。
+> ⚠️ 別の場所 (Koyeb など) で同じトークンの Bot が動いている場合は、先に止めてください。2つ同時に動くと自動投稿が二重になります。
 
 ### 6. 動作を確認する
 
@@ -210,8 +200,8 @@ docker run -d --name atcoder-bot --restart unless-stopped \
 | `/` を入力してもコマンドが出ない | 招待するときに `applications.commands` を付け忘れている (手順2 をやり直す)。または Discord を再読み込みする |
 | グラフが出ない / 送信に失敗する | Bot に **Attach Files** と **Embed Links** の権限があるか確認する |
 | ABC の結果や週次レポートが投稿されない | `RANKING_CHANNEL_ID` が正しいか、Bot がそのチャンネルを見られるか確認する |
-| 再起動したら登録が消えた | データベースがコンテナの中にある。手順5-B のように `DB_PATH` と Volume を設定する |
-| 「⚠️ エラーが発生しました」と出る | ターミナル (Docker なら `docker logs atcoder-bot`) にエラーの詳細が出ているので確認する |
+| 再起動したら登録が消えた | データベースがコンテナの中にある。手順5-B の `docker compose` で起動する (データは `data/` に残る) |
+| 「⚠️ エラーが発生しました」と出る | ターミナル (Docker なら `docker compose logs`) にエラーの詳細が出ているので確認する |
 
 ---
 

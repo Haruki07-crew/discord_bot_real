@@ -1,0 +1,11 @@
+[Unit]
+Description=Update atcoder-bot from GitHub main
+After=network-online.target docker.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+# User と WorkingDirectory はリポジトリを置いた場所に合わせて書き換える
+User=pi
+WorkingDirectory=/home/pi/discord_bot_real
+ExecStart=/home/pi/discord_bot_real/deploy/update.sh
