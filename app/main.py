@@ -49,7 +49,7 @@ def _truncate(text, limit):
 ## @brief フィールドのリストを上限に収まるよう複数のEmbedに分割して作成する
 ## @param fields [(name, value), ...]
 ## @return [discord.Embed, ...] (fieldsが空でも1つは返す)
-def build_embeds(title, color, timestamp, fields, description=None):
+def build_embeds(title, color, timestamp, fields, description=None, footer=None):
   embeds = []
   cur = None
   cur_len = 0
@@ -73,6 +73,8 @@ def build_embeds(title, color, timestamp, fields, description=None):
     cur_len += field_len
   if not embeds:
     embeds.append(discord.Embed(title=title, description=description, color=color, timestamp=timestamp))
+  if footer:
+    embeds[-1].set_footer(text=_truncate(footer, 2048))
   return embeds
 
 
@@ -178,14 +180,37 @@ def abc_ranking_fields(rated, unrated):
   return fields
 
 
-## @brief 毎日1時(JST)に全登録ユーザーのデータをAPIから更新するバックグラウンドタスク
+## @brief 登録ユーザーのデータを1人ずつ同期し続けるバックグラウンドタスク
+## @details 1秒ごとに、提出・コンテスト履歴それぞれで一番古いユーザーを1人ずつ更新する
+##          (提出は5分ごと、コンテスト履歴は24時間ごとが目安)。API のアクセス間隔は http_client が守る。
+##          コマンドはこの同期結果 (DB) を読むだけなので、登録人数が増えてもすぐに応答できる。
+@tasks.loop(seconds=1)
+async def background_sync():
+  try:
+    await sync_step(DB_FILE)
+  except Exception as e:
+    # 例外で tasks.loop が止まると同期が永久に止まるので、必ず捕まえる
+    print(f"[background_sync] Error: {e}")
 
+@background_sync.before_loop
+async def before_background_sync():
+  await client.wait_until_ready()
+
+
+## @brief 「提出データは何分前のものか」をフッター用の文字列で返す
+def sync_footer():
+  oldest = get_oldest_submission_sync(DB_FILE)
+  if oldest is None:
+    return None
+  if oldest == 0:
+    return "一部のユーザーはデータを同期中です (登録直後は反映まで少しかかります)"
+  minutes = max(0, int((time.time() - oldest) // 60))
+  return f"提出データは最大{minutes}分前のものです"
+
+
+## @brief 毎日1時(JST)にDBをバックアップするタスク (データの更新は background_sync が常時行う)
 @tasks.loop(time=datetime.time(hour=1, minute=0, tzinfo=JST))
 async def daily_update():
-  print("[daily_update] Starting daily data update...")
-  users = list(get_user_dict(DB_FILE).keys())
-  await refresh_users_data(users, DB_FILE)
-  print("[daily_update] Daily update complete")
   # 1日1回 DB をバックアップする (14日分を残す)。壊れたり消えたりしても前日の状態に戻せるように
   try:
     path = backup_database(DB_FILE)
@@ -248,8 +273,8 @@ async def _post_weekly_ranking():
       print("[weekly_ranking_post] No registered users, skipping")
       return
 
-    # daily_update(1:00)より前に走るので、先にキャッシュを更新する
-    # (しないと日曜日のACがどの週にも集計されない)
+    # 日曜深夜の提出が同期されていない可能性があるので、集計前に全員分を更新する
+    # (投稿は自動タスクなので、人数に比例して時間がかかっても応答期限の問題はない)
     # レートは終了から遅れて確定するため、コンテスト履歴はキャッシュを使わず取り直す
     # (取り直さないと、日曜深夜に確定したレート変化がどの週にも入らない)
     await refresh_users_data(list(user), DB_FILE, force_contest=True)
@@ -418,6 +443,8 @@ async def auto_abc_ranking():
     # 投稿に成功してから prev_contest を進める (送信失敗時に投稿が失われないように)
     set_prev_contest(next_number, DB_FILE)
     print(f"[auto_abc_ranking] Posted {contest_id} ranking")
+    # レートが確定したので、参加者のコンテスト履歴を次の同期で優先して取り直す (/diligence_growth に反映するため)
+    request_contest_resync([d["atcoder_name"] for d in rated + unrated], DB_FILE)
 
   except Exception as e:
     print(f"[auto_abc_ranking] Error: {e}")
@@ -438,6 +465,8 @@ async def on_ready():
   # 自動投稿タスクを先に起動する (sync が失敗しても自動投稿は止めない)
   if not daily_update.is_running():
     daily_update.start()
+  if not background_sync.is_running():
+    background_sync.start()
   if not weekly_ranking_post.is_running():
     weekly_ranking_post.start()
   if not auto_abc_ranking.is_running():
@@ -700,7 +729,6 @@ async def diligence_growth(interaction: discord.Interaction, period: app_command
     user = get_user_dict(DB_FILE)
     day = period.value
     label = period.name
-    await refresh_users_data(list(user), DB_FILE)
     ranking_data = await make_growth_ranking(user, day, DB_FILE)
 
     if not ranking_data:
@@ -708,7 +736,8 @@ async def diligence_growth(interaction: discord.Interaction, period: app_command
       return
 
     embeds = build_embeds(
-      f"🏆 Diligence & Growth [{label}]🏆", 0xFFD700, interaction.created_at, growth_fields(ranking_data)
+      f"🏆 Diligence & Growth [{label}]🏆", 0xFFD700, interaction.created_at, growth_fields(ranking_data),
+      footer=sync_footer()
     )
 
     if day <= 7:
@@ -746,7 +775,6 @@ async def diligence_growth_point(interaction: discord.Interaction, period: app_c
     user = get_user_dict(DB_FILE)
     day = period.value
     label = period.name
-    await refresh_users_data(list(user), DB_FILE)
     ranking_data = await make_growth_ranking(user, day, DB_FILE)
 
     if not ranking_data:
@@ -774,7 +802,7 @@ async def diligence_growth_point(interaction: discord.Interaction, period: app_c
 
     embeds = build_embeds(
       f"🏆 Diligence & Growth [点数] [{label}]🏆", 0x2ecc71, interaction.created_at,
-      growth_fields(sorted_data, point_first=True)
+      growth_fields(sorted_data, point_first=True), footer=sync_footer()
     )
 
     if day <= 7:
@@ -804,8 +832,6 @@ async def everyone_state(interaction: discord.Interaction):
     if not user:
       await interaction.edit_original_response(content="登録されているユーザーがいません")
       return
-    # daily_update(1:00)前だと昨夜のACが未反映で、連続AC日数が途切れて表示されるため先に更新する
-    await refresh_users_data(list(user), DB_FILE)
 
     user_stats = []
     for atcoder_name, discord_name in user.items():
@@ -823,7 +849,7 @@ async def everyone_state(interaction: discord.Interaction):
         f"総AC数: **{ac_count}** AC　連続AC: **{streak_text}**"
       ))
 
-    embeds = build_embeds("全員の精進状況", 0x3498db, interaction.created_at, fields)
+    embeds = build_embeds("全員の精進状況", 0x3498db, interaction.created_at, fields, footer=sync_footer())
     await send_embeds_to_interaction(interaction, embeds)
   except Exception as e:
     print(e)
