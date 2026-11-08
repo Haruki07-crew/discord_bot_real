@@ -51,7 +51,7 @@ from atcoder.set_prev_contest import set_prev_contest
 # 週次サイクル
 from atcoder.weekly_cycle_helpers import (
   get_weekly_cycle_state, advance_weekly_cycle, save_weekly_snapshot, get_weekly_snapshots,
-  get_weekly_last_posted, set_weekly_last_posted,
+  get_weekly_last_posted, set_weekly_last_posted, get_weekly_prepared, set_weekly_prepared,
 )
 
 __all__ = [
@@ -69,5 +69,5 @@ __all__ = [
   "get_abc_standings", "fetch_abc_standings_if_ready", "get_contest_ac_count",
   "get_latest_ended_abc_number", "get_prev_contest", "set_prev_contest",
   "get_weekly_cycle_state", "advance_weekly_cycle", "save_weekly_snapshot", "get_weekly_snapshots",
-  "get_weekly_last_posted", "set_weekly_last_posted",
+  "get_weekly_last_posted", "set_weekly_last_posted", "get_weekly_prepared", "set_weekly_prepared",
 ]
