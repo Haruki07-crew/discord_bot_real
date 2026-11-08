@@ -19,7 +19,9 @@ import discord_logger
 import alerts
 import atcoder.background_sync as sync_module
 
-intents = discord.Intents.all()
+# 特別な許可が必要な Intents (メッセージ本文・メンバー・プレゼンス) は使わない。
+# スラッシュコマンドだけで動くので不要で、Bot が100サーバーを超えたときの審査も不要になる。
+intents = discord.Intents.default()
 # discord_name は /user_register で自由入力されるため、"@everyone" などを入れると返信で全員に通知が飛ぶ。
 # @everyone/@here とロールへのメンションは無効にする (admin への <@id> メンションは残す)
 client = discord.Client(intents=intents, allowed_mentions=discord.AllowedMentions(everyone=False, roles=False, users=True))
@@ -727,45 +729,43 @@ OTHER_KOSEN_USERS = {
 
 _registration_lock = asyncio.Lock()
 
-async def _bulk_register(message, user_dict):
-  """指定されたユーザー辞書を一括登録する共通処理"""
-  if not is_admin(message.author.id):
+BULK_GROUPS = {"test": TEST_USERS, "other_kosen": OTHER_KOSEN_USERS}
+
+
+## @brief 事前に定義したメンバーをまとめて登録する管理者用コマンド
+## @details 以前はメッセージ本文 (「テスト用にユーザー登録」など) で動かしていたが、
+##          本文を読むには特別な権限 (Message Content Intent) が必要になるため、スラッシュコマンドにした。
+@tree.command(name="bulk_register", description="(管理者用) main.py に定義したメンバーをまとめて登録します")
+@app_commands.choices(group=[
+  app_commands.Choice(name="テスト用 (TEST_USERS)", value="test"),
+  app_commands.Choice(name="他高専テスト用 (OTHER_KOSEN_USERS)", value="other_kosen"),
+])
+async def bulk_register(interaction: discord.Interaction, group: app_commands.Choice[str]):
+  if not is_admin(interaction.user.id):
+    await interaction.response.send_message("このコマンドは管理者だけが使えます", ephemeral=True)
     return
   if _registration_lock.locked():
-    await message.channel.send("⚠️ 現在登録処理中です。完了するまでお待ちください。")
+    await interaction.response.send_message("⚠️ 現在登録処理中です。完了するまでお待ちください。", ephemeral=True)
     return
+  await interaction.response.defer()
+  user_dict = BULK_GROUPS[group.value]
   async with _registration_lock:
-    register_id = message.author.id
-    discord_id = message.author.id
-
     total = len(user_dict)
-    await message.channel.send(f"ユーザー登録を開始します（{total}人）...")
-
+    await interaction.followup.send(f"ユーザー登録を開始します（{total}人）...")
     done = 0
     for atcoder_name, discord_name in user_dict.items():
       try:
-        exist = get_registered_user(atcoder_name, DB_FILE)
-        if exist:
-          await message.channel.send(f"⏭️ {atcoder_name}({discord_name}) は既に登録済みです")
+        if get_registered_user(atcoder_name, DB_FILE):
+          await interaction.followup.send(f"⏭️ {atcoder_name}({discord_name}) は既に登録済みです")
           continue
-        register_user(atcoder_name, discord_name, discord_id, register_id, DB_FILE)
+        register_user(atcoder_name, discord_name, interaction.user.id, interaction.user.id, DB_FILE)
         await initial_fetch_user_data(atcoder_name, DB_FILE)
         done += 1
-        await message.channel.send(f"✅ {atcoder_name}({discord_name}) を登録しました ({done}/{total})")
+        await interaction.followup.send(f"✅ {atcoder_name}({discord_name}) を登録しました ({done}/{total})")
       except Exception as e:
-        await message.channel.send(f"⚠️ {atcoder_name} の登録に失敗: {e}")
-
-    await message.channel.send("✅ ユーザー登録がすべて完了しました！")
-
-@client.event
-async def on_message(message):
-  if message.author.bot:
-    return
-  text = message.content.strip()
-  if text == "テスト用にユーザー登録":
-    await _bulk_register(message, TEST_USERS)
-  elif text == "他高専テスト用に登録":
-    await _bulk_register(message, OTHER_KOSEN_USERS)
+        alerts.record_error("/bulk_register", e)
+        await interaction.followup.send(f"⚠️ {atcoder_name} の登録に失敗: {type(e).__name__}")
+    await interaction.followup.send("✅ ユーザー登録がすべて完了しました！")
 
 
 ## @brief ユーザーの精進記録をEmbedで返すコマンド

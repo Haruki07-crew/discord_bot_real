@@ -34,12 +34,7 @@ AtCoder の精進(AC数・獲得点数)とレートの変化を自動で集計�
 2. 左のメニューから **Bot** を開く。
 3. **Reset Token** を押してトークンを表示し、コピーしておく。これが `DISCORD_TOKEN` になる。
    > ⚠️ トークンはパスワードと同じです。他人に見せたり、GitHub に push したりしないでください。漏れたらすぐに Reset Token で作り直してください。
-4. 同じ **Bot** のページの下にある **Privileged Gateway Intents** で、次の3つをすべて **ON** にして保存する。
-   - Presence Intent
-   - Server Members Intent
-   - Message Content Intent
-
-   > これを忘れると、起動時に `PrivilegedIntentsRequired` というエラーで止まります。
+4. 同じ **Bot** のページの下にある **Privileged Gateway Intents** は、**すべて OFF のままで大丈夫です** (この Bot はスラッシュコマンドだけで動くため、特別な権限を使いません)。
 
 ### 2. Bot を自分のサーバーに招待する
 
@@ -214,12 +209,12 @@ docker compose logs -f     # "activate the bot  now!!!!" が出れば成功
 
 ### 管理者向け: まとめて登録する
 
-`ADMIN_ID` のユーザーが、Bot がいるチャンネルで次のメッセージを送ると、`app/main.py` に書かれたメンバーをまとめて登録します。
+管理者が `/bulk_register` を実行すると、`app/main.py` に書かれたメンバーをまとめて登録します (登録済みの人は飛ばします)。
 
-| メッセージ | 登録されるメンバー |
+| group | 登録されるメンバー |
 |---|---|
-| `テスト用にユーザー登録` | `TEST_USERS` |
-| `他高専テスト用に登録` | `OTHER_KOSEN_USERS` |
+| テスト用 | `TEST_USERS` |
+| 他高専テスト用 | `OTHER_KOSEN_USERS` |
 
 メンバーを変えたいときは、`app/main.py` の `TEST_USERS` / `OTHER_KOSEN_USERS` を書き換えてください。
 
@@ -229,7 +224,6 @@ docker compose logs -f     # "activate the bot  now!!!!" が出れば成功
 
 | 症状 | 原因と対処 |
 |---|---|
-| 起動時に `PrivilegedIntentsRequired` | 手順1-4 の Intents を3つとも ON にする |
 | 起動時に `LoginFailure` / `Improper token` | `DISCORD_TOKEN` が間違っている。Developer Portal で Reset Token してコピーし直す |
 | `/` を入力してもコマンドが出ない | 招待するときに `applications.commands` を付け忘れている (手順2 をやり直す)。または Discord を再読み込みする |
 | グラフが出ない / 送信に失敗する | Bot に **Attach Files** と **Embed Links** の権限があるか確認する |

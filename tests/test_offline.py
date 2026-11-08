@@ -192,6 +192,37 @@ class TestRegister(Base):
     self.assertEqual([u[0] for u in self.users()], ["second_acc"])
 
 
+class TestBulkRegister(Base):
+  def test_admin_only_and_registers_group(self):
+    self.ns["initial_fetch_user_data"] = no_refresh
+    self.ns["admin_id"] = "999"
+    self.ns["BULK_GROUPS"]["test"] = {"aaa": "A", "bbb": "B"}
+    sent = []
+
+    class Resp:
+      async def send_message(self, content=None, ephemeral=False):
+        sent.append(content)
+
+      async def defer(self, **kw):
+        pass
+    import discord
+    choice = discord.app_commands.Choice(name="t", value="test")
+    member = FakeInteraction(self.rec, user_id=1)
+    member.response = Resp()
+    self.run_async(self.ns["bulk_register"].callback(member, choice))
+    self.assertIn("管理者だけ", sent[0])
+    admin = FakeInteraction(self.rec, user_id=999)
+    self.run_async(self.ns["bulk_register"].callback(admin, choice))
+    self.run_async(self.ns["bulk_register"].callback(admin, choice))  # 2回目は登録済みとして飛ばす
+    with dbconn(self.db) as c:
+      self.assertEqual(sorted(r[0] for r in c.execute("SELECT atcoder_name FROM users")), ["aaa", "bbb"])
+    self.assertTrue(any("既に登録済み" in (t or "") for t in self.rec.titles()))
+
+  def test_no_privileged_intents(self):
+    intents = self.ns["intents"]
+    self.assertFalse(intents.message_content or intents.members or intents.presences)
+
+
 class TestVerification(Base):
   def setUp(self):
     super().setUp()
