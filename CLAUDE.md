@@ -32,7 +32,7 @@ Python 3.11 (Docker と同じ)。依存は requirements.txt。pytest は使わ�
   ループで叩く場合は必ず間隔を空け、ユーザー数に比例してリクエストが増える設計は避ける。
   詳細と検証済みの仕様は docs/atcoder-api.md。
 - **本番トークンでローカル起動しない。** 本番の Bot と2つ同時に動き、自動投稿が二重になる。
-  動作確認は tests/ のオフラインテストか、テスト用 Bot のトークンで行う。
+  動作確認は tests/ のオフラインテストか、テスト用 Bot のトークンで行う (docs/testing-on-discord.md)。
 - **`.env` と `database.db` をコミットしない** (.gitignore 済み)。トークンをコードやログに書かない。
 - **main への push = 本番デプロイ** (本番機が5分ごとに main を取り込む)。 必ずブランチ → テスト → PR → マージの順で行う (`/ship` skill)。
 
