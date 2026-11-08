@@ -214,6 +214,16 @@ class TestWeekly(Base):
     snaps = self.ns["get_weekly_snapshots"](1, self.db)
     self.assertEqual(snaps["frank"][0][1], 1)  # 日曜のACだけが先週分
 
+  def test_many_users_post_top10_and_file(self):
+    for i in range(14):
+      add_user(self.db, f"user{i:02d}", f"U{i}")
+    freeze_now(self.ns, self.monday + _dt.timedelta(minutes=15))
+    self.run_async(self.ns["weekly_ranking_post"].coro())
+    weekly = [e for _, e, _ in self.rec.sent if e is not None and "Diligence" in e.title]
+    self.assertEqual(len(weekly), 1)
+    self.assertEqual(len(weekly[0].fields), 11)  # 上位10人 + 「ほか N 人」
+    self.assertIn("📄 全員の順位", [c for _, e, c in self.rec.sent if e is None])
+
   def test_catch_up_only_after_schedule(self):
     freeze_now(self.ns, self.monday + _dt.timedelta(minutes=10))
     self.run_async(self.ns["catch_up_weekly_ranking_post"]())
@@ -326,6 +336,72 @@ class TestBackgroundSync(Base):
     for _ in range(3):
       self.run_async(self.bs.sync_step(self.db))
     self.assertIn("最大0分前", self.ns["sync_footer"]())
+
+
+class TestPaging(Base):
+  def test_pages_of_ten_with_page_numbers(self):
+    fields = [(f"{i + 1}位", f"v{i}") for i in range(25)]
+    pages = self.ns["build_pages"]("T", 0, None, fields, footer="最新")
+    self.assertEqual([len(p.fields) for p in pages], [10, 10, 5])
+    self.assertEqual(pages[0].footer.text, "1/3 ページ　最新")
+    self.assertTrue(all(p.title == "T" for p in pages))
+    self.assertEqual(len(self.ns["build_pages"]("T", 0, None, fields[:3])), 1)
+
+  def test_buttons_move_between_pages(self):
+    pages = self.ns["build_pages"]("T", 0, None, [(str(i), "v") for i in range(25)])
+    shown = []
+
+    class Resp:
+      async def edit_message(self, embed=None, view=None):
+        shown.append(embed)
+
+    async def run():
+      view = self.ns["PageView"](pages)
+      self.assertTrue(view.prev_button.disabled)
+      inter = type("I", (), {"response": Resp()})()
+      await view.next_button.callback(inter)
+      await view.next_button.callback(inter)
+      self.assertTrue(view.next_button.disabled)
+      await view.prev_button.callback(inter)
+      return view.index
+    self.assertEqual(self.run_async(run()), 1)
+    self.assertEqual([e.footer.text for e in shown], ["2/3 ページ", "3/3 ページ", "2/3 ページ"])
+
+  def test_timeout_disables_buttons_with_bot_token(self):
+    pages = self.ns["build_pages"]("T", 0, None, [(str(i), "v") for i in range(25)])
+    edited = []
+
+    class Partial:
+      async def edit(self, view=None):
+        edited.append([item.disabled for item in view.children])
+
+    class Channel:
+      def get_partial_message(self, message_id):
+        return Partial()
+
+    async def run():
+      view = self.ns["PageView"](pages)
+      view.message = type("M", (), {"id": 1, "channel": Channel()})()
+      await view.on_timeout()
+    self.run_async(run())
+    self.assertEqual(edited, [[True, True]])
+
+  def test_top_fields_and_text_file(self):
+    fields = [(f"{i + 1}位 : u{i}", f"Rate: **+{i}**") for i in range(15)]
+    top = self.ns["top_fields"](fields)
+    self.assertEqual(len(top), 11)
+    self.assertIn("ほか 5 人", top[-1][0])
+    f = self.ns["ranking_text_file"]("タイトル", fields, "x.txt")
+    text = f.fp.read().decode("utf-8")
+    self.assertIn("15位 : u14", text)
+    self.assertNotIn("**", text)
+
+  def test_my_rank(self):
+    add_user(self.db, "me_user", uid=42)
+    ranking = [{"atcoder_name": "other", "place": 1}, {"atcoder_name": "Me_User", "place": 2}]
+    it = FakeInteraction(self.rec, user_id=42)
+    self.assertIn("2位", self.ns["my_rank_text"](it, ranking, 2))
+    self.assertIsNone(self.ns["my_rank_text"](FakeInteraction(self.rec, user_id=7), ranking, 2))
 
 
 class TestLogger(unittest.TestCase):

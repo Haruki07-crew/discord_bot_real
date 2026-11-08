@@ -41,7 +41,7 @@ Python 3.11 (Docker と同じ)。依存は requirements.txt。pytest は使わ�
 - インデントは2スペース。コメントとユーザー向けメッセージは日本語。
 - コマンドは `await interaction.response.defer()` してから処理し、例外は捕まえて
   「⚠️ エラーが発生しました…」を返す (既存コマンドと同じ形)。新規作成は `/add-command` skill を参照。
-- Embed は直接作らず `build_embeds()` / `lines_to_fields()` を使う (25フィールド・6000文字の上限で分割される)。
+- Embed は直接作らない。コマンドの返信は `build_pages()` + `send_pages_to_interaction()` (1ページ10人、ボタンで切替)、自動投稿は `top_fields()` + `ranking_text_file()` (上位10人 + 全順位の添付)。人数が増えても連投にならないようにする。
 - 投稿の送信は失敗しうる。自動投稿は `send_with_retry()` を使い、送信成功後に状態 (prev_contest など) を進める。
 - 期間は `get_period_start_unix(day)` に統一する。「今日を含めて day 日分」。
 - AC の数え方 (決定済み): 総合AC = (問題, JSTの日付) ごとに1回 (別の日の解き直しは数える)、新規AC = 期間内に初めて AC した問題。`count_period_ac` が [総合AC, 点数, 新規AC] を返す。
