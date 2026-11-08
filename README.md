@@ -126,7 +126,7 @@ docker compose logs -f     # "activate the bot  now!!!!" が出れば成功
 
 1. Discord でサーバーを開き、メッセージ欄に `/` を入力する。`/user_register` などが候補に出れば OK。
    - 出ない場合は、Discord を再読み込み (`Ctrl + R` / Mac は `Cmd + R`) してください。反映までに数分かかることもあります。
-2. `/user_register atcoder_name:自分のAtCoder名 discord_name:表示したい名前` で自分を登録する。
+2. `/user_register atcoder_name:自分のAtCoder名` で自分を登録する。
 3. `/syozin atcoder_name:自分のAtCoder名` を実行して、AC数が表示されれば完了です 🎉
 
 ---
@@ -137,10 +137,11 @@ docker compose logs -f     # "activate the bot  now!!!!" が出れば成功
 
 | コマンド | 説明 |
 |---|---|
-| `/user_register atcoder_name discord_name` | AtCoder のユーザーを登録する。`discord_name` はランキングに表示される名前 (自由に決めてよい) |
+| `/user_register atcoder_name [discord_name]` | 自分の AtCoder アカウントを登録する。`discord_name` はランキングに表示される名前 (省略すると Discord の表示名) |
 | `/user_unregister atcoder_name` | 登録を解除する。登録した本人か管理者だけが実行できる |
 | `/user_list` | 登録メンバーと現在のレートの一覧を表示する |
 
+- 登録できるのは **1人1アカウント** です (管理者は何人でも登録できます)。登録し直すときは `/user_unregister` で解除してから登録します。
 - 登録すると、その人の過去の提出をすべて取り込みます。提出が多い人は数分かかります。
 - AtCoder のユーザー名は、大文字と小文字を区別しません (`Hanaosi` と `hanaosi` は同じ人として扱います)。
 

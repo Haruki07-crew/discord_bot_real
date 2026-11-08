@@ -138,6 +138,11 @@ def is_valid_atcoder_name(name):
   return ATCODER_NAME_RE.fullmatch(name) is not None
 
 
+## @brief 管理者 (ADMIN_ID) かどうか
+def is_admin(user_id):
+  return admin_id is not None and str(user_id) == str(admin_id)
+
+
 def format_rate_change(rc):
   return f"+{rc}" if rc >= 0 else str(rc)
 
@@ -518,7 +523,7 @@ _registration_lock = asyncio.Lock()
 
 async def _bulk_register(message, user_dict):
   """指定されたユーザー辞書を一括登録する共通処理"""
-  if str(message.author.id) != str(admin_id):
+  if not is_admin(message.author.id):
     return
   if _registration_lock.locked():
     await message.channel.send("⚠️ 現在登録処理中です。完了するまでお待ちください。")
@@ -615,17 +620,29 @@ async def rating_command(interaction: discord.Interaction, atcoder_name: str):
 ## @details AtCoderの存在確認後にDBへ登録する。既登録の場合はエラーを返す。
 ## @param interaction Discordのインタラクション
 ## @param atcoder_name 登録するAtCoderユーザー名
-## @param discord_name 登録するDiscordユーザー名 (手動入力)
-@tree.command(name = "user_register", description="ユーザーを登録します")
-async def user_register(interaction: discord.Interaction, atcoder_name: str, discord_name: str):
+## @param discord_name ランキングに表示する名前 (省略時は Discord の表示名)
+## @details 管理者以外は、自分の AtCoder アカウントを1つだけ登録できる (他人の登録やいたずらでの大量登録を防ぐ)
+@tree.command(name = "user_register", description="自分のAtCoderアカウントを登録します")
+@app_commands.describe(atcoder_name="AtCoderのユーザー名", discord_name="ランキングに表示する名前 (省略するとDiscordの表示名)")
+async def user_register(interaction: discord.Interaction, atcoder_name: str, discord_name: str = None):
   await interaction.response.defer()
   try:
     register_id = interaction.user.id
     discord_id = interaction.user.id
+    if not discord_name:
+      discord_name = getattr(interaction.user, "display_name", None) or str(interaction.user)
 
     if not is_valid_atcoder_name(atcoder_name):
       await interaction.followup.send(f"⚠️エラー : {atcoder_name}は存在しません")
       return
+    if not is_admin(interaction.user.id):
+      mine = get_registered_by_discord_id(interaction.user.id, DB_FILE)
+      if mine:
+        await interaction.followup.send(
+          f"⚠️エラー : すでに {mine} を登録しています。登録できるのは1人1アカウントです。"
+          f"変更するときは `/user_unregister` で解除してから登録し直してください"
+        )
+        return
     exist_user = get_registered_user(atcoder_name, DB_FILE)
     if exist_user:
       await interaction.followup.send(f"⚠️エラー: {atcoder_name} さんはすでに<@{exist_user[1]}>さんによって登録されています")
@@ -640,6 +657,9 @@ async def user_register(interaction: discord.Interaction, atcoder_name: str, dis
     # 存在確認を待っている間に同じユーザーが登録されていないか確認し直す
     # (ここから INSERT までは await を挟まないので、同時に実行されても二重登録にならない)
     exist_user = get_registered_user(atcoder_name, DB_FILE)
+    if not exist_user and not is_admin(interaction.user.id) and get_registered_by_discord_id(interaction.user.id, DB_FILE):
+      await interaction.followup.send("⚠️エラー : 登録できるのは1人1アカウントです")
+      return
     if exist_user:
       await interaction.followup.send(f"⚠️エラー: {atcoder_name} さんはすでに<@{exist_user[1]}>さんによって登録されています")
       return
@@ -678,7 +698,7 @@ async def user_unregister(interaction: discord.Interaction, atcoder_name: str):
   if register_id is None:
     await interaction.followup.send(f"{atcoder_name}さんは登録されていません")
     return
-  if user_id == register_id or str(user_id) == str(admin_id):
+  if user_id == register_id or is_admin(user_id):
     delete_user(atcoder_name, DB_FILE)
     await interaction.followup.send(f"{atcoder_name}さんの登録を解除しました")
   else:

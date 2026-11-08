@@ -9,6 +9,7 @@ from atcoder.delete_user import delete_user
 from atcoder.get_user_dict import get_user_dict
 from atcoder.get_registered_user import get_registered_user
 from atcoder.get_register_id import get_register_id
+from atcoder.get_registered_by_discord_id import get_registered_by_discord_id
 from atcoder.atcoder_user_exists import atcoder_user_exists
 
 # データ取得・キャッシュ
@@ -51,7 +52,7 @@ from atcoder.weekly_cycle_helpers import (
 
 __all__ = [
   "init_db", "init_progress_tables", "register_user", "delete_user", "get_user_dict",
-  "get_registered_user", "get_register_id", "atcoder_user_exists",
+  "get_registered_user", "get_register_id", "get_registered_by_discord_id", "atcoder_user_exists",
   "fetch_and_cache_contest_history", "fetch_and_cache_ac_submissions",
   "initial_fetch_user_data", "refresh_users_data", "backup_database",
   "sync_step", "request_contest_resync", "get_oldest_submission_sync",
