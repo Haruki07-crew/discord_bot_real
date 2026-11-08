@@ -19,20 +19,27 @@
 
 ---
 
-## ⚠️ 移行するときの注意 (Koyeb から)
+## ⚠️ 同じ Bot を2か所で動かさない
 
-**Koyeb で動いている Bot を先に止めてください。**
-
-同じトークンの Bot が2つ動くと、ABC の結果や週次レポートが二重に投稿されます。スラッシュコマンドも、どちらが応答するか不安定になります。
-
-Koyeb の DB は、デプロイのたびに消えていた可能性が高いので、データは引き継げない前提で考えてください。新しい環境で起動したら、次のどちらかで登録し直します。
-
-- 管理者が「テスト用にユーザー登録」と送って、まとめて登録する
-- 各自が `/user_register` で登録する
+同じトークンの Bot が2つ同時に動くと、ABC の結果や週次レポートが二重に投稿されます。新しい環境で動かす前に、ほかの場所 (自分の PC など) で動かしている Bot は止めてください。
 
 ---
 
 ## ラズパイ5 で動かす
+
+全体の流れと、それぞれで学べること:
+
+| 手順 | やること | 学べること |
+|---|---|---|
+| 1 | OS を入れて SSH で接続する | Linux のインストール、SSH (リモートログイン) |
+| 2 | Docker を入れる | パッケージ管理 (apt)、ユーザーとグループの権限 |
+| 3 | Deploy key で clone する | SSH 鍵の仕組み、最小権限 (読み取り専用) の考え方 |
+| 4 | `.env` を置く | 秘密情報をコードから分けて管理すること |
+| 5 | `docker compose` で起動する | コンテナ、ボリューム (データの永続化)、ログ |
+| 6 | systemd タイマーで自動更新する | サービスの管理、定期実行 (cron の代わり) |
+| 7 | バックアップを手元に取る | バックアップとリストアの考え方 |
+
+各手順の終わりに「確認」と書いたコマンドがあります。期待どおりに表示されてから次に進むと、どこで詰まったかが分かりやすくなります。
 
 ### 1. OS を入れる
 
@@ -52,6 +59,8 @@ Koyeb の DB は、デプロイのたびに消えていた可能性が高いの�
 ssh <ユーザー名>@atcoder-bot.local
 ```
 
+**確認:** `uname -m` が `aarch64` と表示されれば、64bit 版の OS が入っています。
+
 > 💡 長く動かし続けるなら、SD カードより **SSD** の方が壊れにくくて安心です。電源は公式の 27W アダプタ、冷却はアクティブクーラーを推奨します。
 
 ### 2. Docker を入れる
@@ -63,7 +72,10 @@ sudo usermod -aG docker $USER
 exit   # 一度ログアウトして入り直すと、sudo なしで docker が使えるようになる
 ```
 
-入り直したら、`docker compose version` でバージョンが表示されることを確認します。
+**確認:** 入り直したら、次の2つを実行します。
+
+- `docker compose version`: バージョンが表示される
+- `docker run --rm hello-world`: `Hello from Docker!` と表示される
 
 ### 3. リポジトリを取ってくる (非公開リポジトリなので Deploy key を使う)
 
@@ -88,6 +100,7 @@ Host github.com
   IdentityFile ~/.ssh/atcoder_bot_deploy
   IdentitiesOnly yes
 EOF
+ssh -T git@github.com      # 確認: "Hi Haruki07-crew/discord_bot_real! You've successfully authenticated" と出る
 git clone git@github.com:Haruki07-crew/discord_bot_real.git ~/discord_bot_real
 cd ~/discord_bot_real
 ```
@@ -176,3 +189,42 @@ docker compose down
 cp data/backups/database-YYYYMMDD.db data/database.db
 docker compose up -d
 ```
+
+---
+
+## 詰まったときは
+
+| 症状 | 確認すること |
+|---|---|
+| `ssh: Could not resolve hostname atcoder-bot.local` | PC とラズパイが同じネットワークにあるか確認する。ルーターの管理画面でラズパイの IP アドレスを調べ、`ssh <ユーザー名>@<IPアドレス>` で接続する |
+| `permission denied while trying to connect to the Docker daemon socket` | `usermod -aG docker` のあとに、ログインし直したか確認する |
+| `git clone` で `Permission denied (publickey)` | Deploy key の登録と `~/.ssh/config` の内容を確認する。`ssh -vT git@github.com` で詳しいログが出る |
+| `docker compose up` で `env file ... not found` | `app/.env` を置いたか確認する (手順4) |
+| Bot がすぐ止まる / 再起動を繰り返す | `docker compose logs --tail 50` でエラーを見る。`PrivilegedIntentsRequired` や `Improper token` なら README の「困ったとき」を参照 |
+| 自動更新されない | `systemctl list-timers` にタイマーがあるか確認する。`journalctl -u atcoder-bot-update -n 50` でログを見る |
+
+## 参考リンク
+
+**Raspberry Pi**
+- [Raspberry Pi Imager (ダウンロード)](https://www.raspberrypi.com/software/)
+- [Getting started (公式ドキュメント)](https://www.raspberrypi.com/documentation/computers/getting-started.html): OS の書き込みと初期設定
+- [Remote access (公式ドキュメント)](https://www.raspberrypi.com/documentation/computers/remote-access.html): SSH での接続、IP アドレスの調べ方
+- [Raspberry Pi hardware (公式ドキュメント)](https://www.raspberrypi.com/documentation/computers/raspberry-pi.html): 電源・冷却・SSD (NVMe) からの起動
+
+**Docker**
+- [Install Docker Engine on Debian](https://docs.docker.com/engine/install/debian/): Raspberry Pi OS は Debian ベース。手順2の `get.docker.com` は、このページの "convenience script" のこと
+- [Linux post-installation steps](https://docs.docker.com/engine/install/linux-postinstall/): sudo なしで docker を使う設定
+- [Docker Compose overview](https://docs.docker.com/compose/): `compose.yaml` の書き方
+- [Volumes](https://docs.docker.com/engine/storage/volumes/): データを残す仕組み (このリポジトリでは `./data` をコンテナにつないでいる)
+
+**GitHub / SSH**
+- [Managing deploy keys](https://docs.github.com/en/authentication/connecting-to-github-with-ssh/managing-deploy-keys): 手順3の Deploy key
+- [Generating a new SSH key](https://docs.github.com/en/authentication/connecting-to-github-with-ssh/generating-a-new-ssh-key-and-adding-it-to-the-ssh-agent): `ssh-keygen` の使い方
+
+**systemd**
+- [systemd.timer (man page)](https://www.freedesktop.org/software/systemd/man/latest/systemd.timer.html): 手順6のタイマーの書き方
+- [ArchWiki: systemd/Timers](https://wiki.archlinux.org/title/Systemd/Timers): 例が多くて分かりやすい解説
+
+**Azure**
+- [Azure for Students](https://azure.microsoft.com/free/students/): 学生向け特典の内容
+- [Quickstart: Linux VM を portal で作成](https://learn.microsoft.com/azure/virtual-machines/linux/quick-create-portal): VM の作り方
