@@ -54,7 +54,22 @@ from atcoder.weekly_cycle_helpers import (
   get_weekly_last_posted, set_weekly_last_posted, get_weekly_prepared, set_weekly_prepared,
 )
 
+# おすすめ・スコア・通知・実績・リマインド
+from atcoder.problem_data import get_problem_data, color_name, color_range, problem_difficulty, problem_score, problem_link
+from atcoder.engagement import (
+  get_solved_problems, pick_recommendations, get_period_score, rating_progress_text, next_wall_slot,
+)
+from atcoder.notifications import (
+  init_engagement_tables, set_notification, get_notification_targets, link_discord_account, get_state, set_state,
+)
+from atcoder.achievements import find_new_achievements, record_achievements
+from atcoder.contest_reminder import get_upcoming_abc, due_reminders, mark_reminded
+
 __all__ = [
+  "get_problem_data", "color_name", "color_range", "problem_difficulty", "problem_score", "problem_link",
+  "get_solved_problems", "pick_recommendations", "get_period_score", "rating_progress_text", "next_wall_slot",
+  "init_engagement_tables", "set_notification", "get_notification_targets", "link_discord_account", "get_state", "set_state",
+  "find_new_achievements", "record_achievements", "get_upcoming_abc", "due_reminders", "mark_reminded",
   "init_db", "init_progress_tables", "register_user", "delete_user", "get_user_dict",
   "get_registered_user", "get_register_id", "get_registered_by_discord_id", "atcoder_user_exists",
   "init_verification_table", "create_pending_verification", "get_pending_verification",

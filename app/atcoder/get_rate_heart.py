@@ -11,7 +11,7 @@ def get_rate_heart(rating):
     return "🩵"
   if rating < 2000:
     return "💙"
-  if rating < 2500:
+  if rating < 2400:
     return "💛"
   if rating < 2800:
     return "🧡"

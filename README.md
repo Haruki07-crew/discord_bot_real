@@ -154,6 +154,9 @@ docker compose logs -f     # "activate the bot  now!!!!" が出れば成功
 | `/everyone_state` | 全員の解いた問題数と、何日連続でACしているかを表示する (今日の分は含めず、昨日から数える) |
 | `/diligence_growth period` | 期間内のレート変化とAC数のランキングを、グラフ付きで表示する |
 | `/diligence_growth_point period` | `/diligence_growth` の点数版。AC数のかわりに獲得点数で比べる |
+| `/recommend [atcoder_name]` | レートに合った未ACの問題を、易しめ・ちょうどいい・挑戦の3問おすすめする |
+| `/diligence_score period [color]` | 難易度で重み付けした精進スコアのランキング |
+| `/versus opponent [me]` | 登録ユーザーとレート・1週間の精進・相手だけが解いた問題を比べる |
 | `/abc_ranking contest_number` | 指定した ABC (例: `483`) での、登録メンバーの順位・AC数・パフォーマンス・レート変化を表示する |
 
 **AC の数え方**
@@ -165,6 +168,17 @@ docker compose logs -f     # "activate the bot  now!!!!" が出れば成功
 | 点数 | 総合AC と同じ単位 (問題・日ごと) で、問題の点数を足したもの |
 
 ランキングの並び順は「レート変化 → 総合AC (点数版は点数)」です。
+
+**精進スコア** は、期間内に**初めて解いた問題だけ**を難易度で点数にします (灰10・茶20・緑40・水80・青160・黄320・橙640・赤1280)。解き直しでは増えません。
+
+`/diligence_growth` と `/diligence_growth_point` は、`color` を指定すると同じレート帯の人だけで順位を出します。`/syozin` には、次の色まであといくつかと直近のレート推移も出ます。
+
+**DM 通知**
+
+`/notify kind enabled` で、次の DM を自分で選んでオン・オフできます。受け取るには、サーバーのプライバシー設定で DM を許可してください。
+
+- 連続ACのリマインド: 毎日22時に、今日まだACしておらず連続記録が途切れそうなときに届く
+- 週次ふり返り: 毎週月曜9時に、先週の総合AC・新規AC・スコア・レート変化と「次の壁」(ABC で解いた割合が初めて半分を切る問題) が届く
 
 **表示のしかた**
 
@@ -193,6 +207,8 @@ docker compose logs -f     # "activate the bot  now!!!!" が出れば成功
 |---|---|
 | ABC のレートが確定したあと (1時間ごとに確認) | その ABC に参加した登録メンバーのランキング |
 | 毎週月曜 0:15 | 先週 (月〜日) のランキングと、12週分の累積グラフ (AC数版・点数版) |
+| ABC 開始の30分前 | 開始時刻とコンテストのリンク |
+| 実績を達成したとき (30分ごとに確認) | 連続AC、解いた問題数、初の色diff AC、色変、レート自己ベスト |
 
 - 毎日 1:00 にデータベースをバックアップします (投稿はしません)。
 - 週次レポートは12週で1サイクルです。13週目からはグラフがリセットされます。
@@ -215,6 +231,8 @@ docker compose logs -f     # "activate the bot  now!!!!" が出れば成功
 |---|---|
 | テスト用 | `TEST_USERS` |
 | 他高専テスト用 | `OTHER_KOSEN_USERS` |
+
+`/bulk_register` で登録した人は管理者の ID で登録されています。本人が `/notify` や「あなたの順位」を使えるように、`/user_link atcoder_name member` で本人の Discord アカウントに紐づけてください。
 
 メンバーを変えたいときは、`app/main.py` の `TEST_USERS` / `OTHER_KOSEN_USERS` を書き換えてください。
 

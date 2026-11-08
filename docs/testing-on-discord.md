@@ -38,6 +38,12 @@ python main.py
 - [ ] `/syozin` で、今日の総合AC・新規ACが表示される
 - [ ] `/bulk_register` で何人か登録してから `/diligence_growth 1週間` を実行し、◀ ▶ ボタンでページが切り替わる。グラフはどのページでも Embed の中に表示される
 - [ ] ボタンが15分後に押せなくなる
+- [ ] `/recommend`、`/diligence_score 1週間`、`/versus` が表示され、問題のリンクが正しく開ける
+- [ ] `/diligence_growth 1週間 color:緑色` で同じ色の人だけが出る
+- [ ] `/notify` でオンにすると DM が届く (22時の連続ACリマインド、月曜9時の週次ふり返り)
+- [ ] `/bulk_register` した人に `/user_link` を実行すると、本人が `/notify` を使えるようになる
+- [ ] ABC の30分前にリマインドが出る
+- [ ] 実績は、過去の分がまとめて投稿されず、新しく達成したときだけ投稿される
 - [ ] `/everyone_state`、`/user_list`、`/abc_ranking 483` が表示される
 - [ ] `/bot_status` は管理者だけに見え、管理者以外には断りのメッセージが出る
 - [ ] わざとエラーを起こすと (例: 起動中に DB ファイルを消す)、管理者に DM が届く

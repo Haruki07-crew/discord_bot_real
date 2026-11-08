@@ -328,6 +328,38 @@ async def progress_message(interaction, text):
     print(f"[progress_message] channel send failed: {e}")
 
 
+COLOR_CHOICES = [app_commands.Choice(name=f"{band}色", value=band) for band in ("灰", "茶", "緑", "水", "青", "黄", "橙", "赤")]
+PERIOD_CHOICES = [
+  app_commands.Choice(name="1日", value=1), app_commands.Choice(name="1週間", value=7),
+  app_commands.Choice(name="1ヶ月", value=30), app_commands.Choice(name="3ヶ月", value=90),
+  app_commands.Choice(name="半年", value=180), app_commands.Choice(name="1年", value=365),
+]
+
+
+## @brief 指定した色のレート帯のユーザーだけに絞る (color が None なら全員)
+def filter_by_color(user, color):
+  if color is None:
+    return user
+  lower, upper = color_range(color.value)
+  return {name: d for name, d in user.items() if lower <= get_latest_rating_from_db(name, DB_FILE) < upper}
+
+
+## @brief 登録済みの AtCoder 名を、登録時の表記で返す (大文字小文字は区別しない。無ければ None)
+def registered_name(atcoder_name):
+  return {name.lower(): name for name in get_user_dict(DB_FILE)}.get(atcoder_name.lower())
+
+
+## @brief DM を送る。DM を受け取らない設定の人もいるので、失敗しても例外にしない
+async def send_dm(discord_id, text):
+  try:
+    target = client.get_user(int(discord_id)) or await client.fetch_user(int(discord_id))
+    await target.send(text[:1900])
+    return True
+  except Exception as e:
+    print(f"[send_dm] {discord_id}: {type(e).__name__}: {e}")
+    return False
+
+
 ## @brief 管理者 (ADMIN_ID) かどうか
 def is_admin(user_id):
   return admin_id is not None and str(user_id) == str(admin_id)
@@ -725,6 +757,134 @@ async def before_auto_abc_ranking():
   await client.wait_until_ready()
 
 
+## ---- 定期処理 (リマインド・実績・ふり返り) ----
+## @brief ABC 開始の30分前にチャンネルへ知らせる
+@tasks.loop(minutes=1)
+async def abc_reminder_task():
+  try:
+    if ranking_channel_id is None:
+      return
+    channel = client.get_channel(ranking_channel_id)
+    if channel is None:
+      return
+    for contest in due_reminders(await get_upcoming_abc(), DB_FILE):
+      start = datetime.datetime.fromtimestamp(contest["start"], JST).strftime("%H:%M")
+      await channel.send(f"⏰ まもなく **{contest['title']}** が始まります ({start} 開始)\nhttps://atcoder.jp/contests/{contest['id']}")
+      mark_reminded(contest["id"], DB_FILE)
+  except Exception as e:
+    summary = alerts.record_error("abc_reminder_task", e)
+    await alerts.notify_admin("abc_reminder_task", f"ABCリマインドで例外\n{summary}", cooldown=6 * 60 * 60)
+
+
+## @brief 新しく達成した実績をチャンネルへ投稿する
+@tasks.loop(minutes=30)
+async def achievements_task():
+  try:
+    if ranking_channel_id is None:
+      return
+    channel = client.get_channel(ranking_channel_id)
+    if channel is None:
+      return
+    models, _problems = await get_problem_data()
+    # 全員の履歴を読むので、イベントループを止めないよう別スレッドで行う
+    new = await asyncio.to_thread(find_new_achievements, DB_FILE, models)
+    if not new:
+      return
+    lines = [f"**{name}** ({discord_name}): {text}" for name, discord_name, _badge, text in new]
+    embeds = build_embeds("🏅 実績を達成しました！", 0xF1C40F, datetime.datetime.now(JST), lines_to_fields("おめでとう！", lines))
+    await send_embeds_to_channel(channel, embeds)
+    record_achievements([(name, badge) for name, _d, badge, _t in new], DB_FILE)
+  except Exception as e:
+    summary = alerts.record_error("achievements_task", e)
+    await alerts.notify_admin("achievements_task", f"実績の投稿で例外\n{summary}", cooldown=6 * 60 * 60)
+
+
+## @brief 毎日22時に、連続ACが途切れそうな希望者へ DM する
+@tasks.loop(time=datetime.time(hour=22, minute=0, tzinfo=JST))
+async def streak_reminder_task():
+  try:
+    today = datetime.datetime.now(JST).strftime("%Y-%m-%d")
+    if get_state("streak_reminder_last", DB_FILE) == today:
+      return
+    set_state("streak_reminder_last", today, DB_FILE)
+    failure = None
+    for discord_id, atcoder_name in get_notification_targets("streak", DB_FILE):
+      try:  # 1人の失敗で残りの人に届かなくならないように
+        await refresh_users_data([atcoder_name], DB_FILE)  # 夜のACを見落として誤って通知しないように
+        streak = get_ac_streak(atcoder_name, DB_FILE)
+        today_ac = (await count_period_ac(atcoder_name, 1, DB_FILE))[0]
+        if streak >= 1 and today_ac == 0:
+          await send_dm(discord_id, f"🔥 {atcoder_name} さん、今日はまだACしていません。今日ACしないと連続{streak}日の記録が途切れます！")
+      except Exception as e:
+        failure = alerts.record_error("streak_reminder_task", e)
+    if failure:
+      await alerts.notify_admin("streak_reminder_task", f"連続ACのリマインドで一部失敗\n{failure}")
+  except Exception as e:
+    summary = alerts.record_error("streak_reminder_task", e)
+    await alerts.notify_admin("streak_reminder_task", f"連続ACのリマインドで例外\n{summary}")
+
+
+def _diff_text(current, previous):
+  diff = current - previous
+  return f"先週より{diff}多い" if diff > 0 else f"先週より{-diff}少ない" if diff < 0 else "先週と同じ"
+
+
+## @brief 週次ふり返りの本文を作る
+async def build_weekly_review(atcoder_name, week_end_unix, models):
+  previous_end = week_end_unix - 7 * 24 * 60 * 60
+  # 期間は「今日を含めて N 日分」。月曜に 8 で先週、15 で先々週から数える
+  this_week = await count_period_ac(atcoder_name, 8, DB_FILE, week_end_unix)
+  last_week = await count_period_ac(atcoder_name, 15, DB_FILE, previous_end)
+  score = get_period_score(atcoder_name, 8, DB_FILE, models, week_end_unix)
+  rate = (await get_ac_rate_change_data({atcoder_name: atcoder_name}, 8, DB_FILE, week_end_unix))[atcoder_name]["rate_change"]
+  lines = [
+    f"📝 **{atcoder_name} さんの先週のふり返り**",
+    f"総合AC: **{this_week[0]}** ({_diff_text(this_week[0], last_week[0])})",
+    f"新規AC: **{this_week[2]}**　精進スコア: **{score}**　レート変化: **{format_rate_change(rate)}**",
+  ]
+  wall = next_wall_slot(atcoder_name, get_prev_contest(DB_FILE), DB_FILE)
+  if wall:
+    lines.append(f"次の壁: ABCの **{wall[0]}問題** (直近100回のうち解いたのは{wall[1]:.0%})")
+  return "\n".join(lines)
+
+
+## @brief 毎週月曜9時に、希望者へ先週のふり返りを DM する
+@tasks.loop(time=datetime.time(hour=9, minute=0, tzinfo=JST))
+async def weekly_review_task():
+  try:
+    now = datetime.datetime.now(JST)
+    today = now.strftime("%Y-%m-%d")
+    if now.weekday() != 0 or get_state("weekly_review_last", DB_FILE) == today:
+      return
+    set_state("weekly_review_last", today, DB_FILE)
+    targets = get_notification_targets("weekly_review", DB_FILE)
+    if not targets:
+      return
+    models, _problems = await get_problem_data()
+    week_end_unix = int(datetime.datetime(now.year, now.month, now.day, tzinfo=JST).timestamp())
+    failure = None
+    for discord_id, atcoder_name in targets:
+      try:  # 1人の失敗で残りの人に届かなくならないように
+        await send_dm(discord_id, await build_weekly_review(atcoder_name, week_end_unix, models))
+      except Exception as e:
+        failure = alerts.record_error("weekly_review_task", e)
+    if failure:
+      await alerts.notify_admin("weekly_review_task", f"週次ふり返りで一部失敗\n{failure}")
+  except Exception as e:
+    summary = alerts.record_error("weekly_review_task", e)
+    await alerts.notify_admin("weekly_review_task", f"週次ふり返りで例外\n{summary}")
+
+
+ENGAGEMENT_TASKS = (abc_reminder_task, achievements_task, streak_reminder_task, weekly_review_task)
+
+
+async def _wait_until_ready():
+  await client.wait_until_ready()
+
+for _task in ENGAGEMENT_TASKS:
+  _task.before_loop(_wait_until_ready)
+
+
 _commands_synced = False
 
 ## @brief Bot起動時のイベントハンドラ
@@ -740,6 +900,9 @@ async def on_ready():
     daily_update.start()
   if not background_sync.is_running():
     background_sync.start()
+  for task in ENGAGEMENT_TASKS:
+    if not task.is_running():
+      task.start()
   if not weekly_ranking_post.is_running():
     weekly_ranking_post.start()
   if not auto_abc_ranking.is_running():
@@ -862,6 +1025,9 @@ async def rating_command(interaction: discord.Interaction, atcoder_name: str):
     embed.add_field(name="今日の新規AC", value=new_ac, inline=True)
     embed.add_field(name="今日の獲得点数", value=f"**{round(ac_daily[1])}** 点", inline=True)
     embed.add_field(name="これまでに解いた問題数", value=f"**{ac_sum}** 問", inline=False)
+    progress = rating_progress_text(atcoder_name, DB_FILE)
+    if progress:
+      embed.add_field(name="レート", value=progress, inline=False)
     embed.description = "総合AC: 同じ問題でも別の日に解き直せば数える (同じ日は1回)\n新規AC: 初めて解いた問題の数"
     if ac_daily[0] == 0:
       embed.set_footer(text = "精進せんかい雑魚bro\n")
@@ -1036,13 +1202,13 @@ async def user_list(interaction: discord.Interaction):
   app_commands.Choice(name = "3ヶ月", value = 90),
   app_commands.Choice(name = "半年",  value = 180),
   app_commands.Choice(name = "1年",  value = 365),
-])
-async def diligence_growth(interaction: discord.Interaction, period: app_commands.Choice[int]):
+], color=COLOR_CHOICES)
+async def diligence_growth(interaction: discord.Interaction, period: app_commands.Choice[int], color: app_commands.Choice[str] = None):
   await interaction.response.defer()
   try:
-    user = get_user_dict(DB_FILE)
+    user = await asyncio.to_thread(filter_by_color, get_user_dict(DB_FILE), color)  # 全員分の DB 読み込みでイベントループを止めない
     day = period.value
-    label = period.name
+    label = f"{period.name} / {color.name}" if color else period.name
     ranking_data = await make_growth_ranking(user, day, DB_FILE)
 
     if not ranking_data:
@@ -1082,13 +1248,13 @@ async def diligence_growth(interaction: discord.Interaction, period: app_command
   app_commands.Choice(name = "3ヶ月", value = 90),
   app_commands.Choice(name = "半年",  value = 180),
   app_commands.Choice(name = "1年",  value = 365),
-])
-async def diligence_growth_point(interaction: discord.Interaction, period: app_commands.Choice[int]):
+], color=COLOR_CHOICES)
+async def diligence_growth_point(interaction: discord.Interaction, period: app_commands.Choice[int], color: app_commands.Choice[str] = None):
   await interaction.response.defer()
   try:
-    user = get_user_dict(DB_FILE)
+    user = await asyncio.to_thread(filter_by_color, get_user_dict(DB_FILE), color)  # 全員分の DB 読み込みでイベントループを止めない
     day = period.value
-    label = period.name
+    label = f"{period.name} / {color.name}" if color else period.name
     ranking_data = await make_growth_ranking(user, day, DB_FILE)
 
     if not ranking_data:
@@ -1201,6 +1367,132 @@ async def abc_ranking(interaction: discord.Interaction, contest_number: int):
       interaction, "abc_ranking", e,
       user_message=f"⚠️ エラーが発生しました。ABC{contest_number:03d} は存在しないか、まだ終了していない可能性があります。"
     )
+
+
+## @brief レートに合った未ACの問題を3問おすすめするコマンド
+@tree.command(name="recommend", description="レートに合った、まだ解いていない問題をおすすめします")
+@app_commands.describe(atcoder_name="対象のAtCoder名 (省略すると自分)")
+@app_commands.autocomplete(atcoder_name=registered_atcoder_autocomplete)
+async def recommend(interaction: discord.Interaction, atcoder_name: str = None):
+  await interaction.response.defer()
+  try:
+    name = registered_name(atcoder_name) if atcoder_name else get_registered_by_discord_id(interaction.user.id, DB_FILE)
+    if name is None:
+      await interaction.edit_original_response(content="⚠️ 登録済みのユーザーだけが使えます。`/user_register` で登録してください")
+      return
+    models, problems = await get_problem_data()
+    rating = get_latest_rating_from_db(name, DB_FILE)
+    picks = pick_recommendations(rating, get_solved_problems(name, DB_FILE), models, problems)
+    if not picks:
+      await interaction.edit_original_response(content=f"{name} さんにおすすめできる問題が見つかりませんでした")
+      return
+    fields = [(f"{label} (diff {difficulty} / {color_name(difficulty)})", problem_link(problem_id, problems)) for label, problem_id, difficulty in picks]
+    await send_pages_to_interaction(interaction, build_pages(f"🎯 {name} さんへのおすすめ (レート {rating})", 0x1ABC9C, interaction.created_at, fields))
+  except Exception as e:
+    await report_command_error(interaction, "recommend", e)
+
+
+## @brief DM 通知のオン・オフを切り替えるコマンド (本人にだけ見える)
+@tree.command(name="notify", description="連続ACのリマインドや週次ふり返りのDMをオン・オフします")
+@app_commands.choices(kind=[
+  app_commands.Choice(name="連続ACが途切れそうなとき (毎日22時)", value="streak"),
+  app_commands.Choice(name="週次ふり返り (毎週月曜9時)", value="weekly_review"),
+])
+async def notify(interaction: discord.Interaction, kind: app_commands.Choice[str], enabled: bool):
+  await interaction.response.defer(ephemeral=True)
+  try:
+    name = get_registered_by_discord_id(interaction.user.id, DB_FILE)
+    if name is None:
+      await interaction.edit_original_response(content="⚠️ 自分のアカウントを登録している人だけが使えます。`/user_register` で登録してください")
+      return
+    set_notification(interaction.user.id, name, kind.value, enabled, DB_FILE)
+    extra = "\nDMを受け取れるよう、このサーバーのプライバシー設定で「ダイレクトメッセージ」を許可してください" if enabled else ""
+    await interaction.edit_original_response(content=f"{kind.name}: {'オン' if enabled else 'オフ'}にしました ({name}){extra}")
+  except Exception as e:
+    await report_command_error(interaction, "notify", e)
+
+
+## @brief 登録済みの AtCoder アカウントを Discord ユーザーに紐づける管理者用コマンド
+## @details /bulk_register で登録した人は管理者の ID で登録されているため、本人の順位表示や通知が使えない
+@tree.command(name="user_link", description="(管理者用) 登録済みのAtCoderアカウントをDiscordユーザーに紐づけます")
+@app_commands.autocomplete(atcoder_name=registered_atcoder_autocomplete)
+async def user_link(interaction: discord.Interaction, atcoder_name: str, member: discord.User):
+  await interaction.response.defer(ephemeral=True)
+  try:
+    if not is_admin(interaction.user.id):
+      await interaction.edit_original_response(content="このコマンドは管理者だけが使えます")
+      return
+    done = link_discord_account(atcoder_name, member.id, DB_FILE)
+    await interaction.edit_original_response(
+      content=f"{atcoder_name} を {member} に紐づけました" if done else f"{atcoder_name} さんは登録されていません"
+    )
+  except Exception as e:
+    await report_command_error(interaction, "user_link", e)
+
+
+## @brief 難易度で重み付けした精進スコアのランキングを表示するコマンド
+@tree.command(name="diligence_score", description="難易度で重み付けした精進スコアのランキングを表示します")
+@app_commands.choices(period=PERIOD_CHOICES, color=COLOR_CHOICES)
+async def diligence_score(interaction: discord.Interaction, period: app_commands.Choice[int], color: app_commands.Choice[str] = None):
+  await interaction.response.defer()
+  try:
+    user = await asyncio.to_thread(filter_by_color, get_user_dict(DB_FILE), color)  # 全員分の DB 読み込みでイベントループを止めない
+    if not user:
+      await interaction.edit_original_response(content="対象のユーザーがいません")
+      return
+    models, _problems = await get_problem_data()
+    def score_rows():
+      return sorted(
+        ((get_period_score(name, period.value, DB_FILE, models), name, discord_name) for name, discord_name in user.items()),
+        key=lambda r: r[0], reverse=True,
+      )
+    rows = await asyncio.to_thread(score_rows)
+    ranking, fields = [], []
+    place, previous = 0, None
+    for i, (score, name, discord_name) in enumerate(rows):
+      if score != previous:
+        place, previous = i + 1, score
+      ranking.append({"atcoder_name": name, "place": place})
+      fields.append((f"{place}位 : {name}({discord_name})", f"精進スコア : **{score}**"))
+    label = f"{period.name} / {color.name}" if color else period.name
+    description = "期間内に初めて解いた問題だけを、難しいほど高い点で数えます (灰10・緑40・青160・赤1280)"
+    mine = my_rank_text(interaction, ranking, len(ranking))
+    pages = build_pages(f"💪 精進スコア [{label}]", 0x9B59B6, interaction.created_at, fields,
+                        description=f"{mine}\n{description}" if mine else description, footer=sync_footer())
+    await send_pages_to_interaction(interaction, pages)
+  except Exception as e:
+    await report_command_error(interaction, "diligence_score", e)
+
+
+## @brief 2人の精進を比べるコマンド
+@tree.command(name="versus", description="登録ユーザーと自分の精進を比べます")
+@app_commands.describe(opponent="比べる相手のAtCoder名", me="自分のAtCoder名 (省略すると自分のアカウント)")
+@app_commands.autocomplete(opponent=registered_atcoder_autocomplete, me=registered_atcoder_autocomplete)
+async def versus(interaction: discord.Interaction, opponent: str, me: str = None):
+  await interaction.response.defer()
+  try:
+    mine = registered_name(me) if me else get_registered_by_discord_id(interaction.user.id, DB_FILE)
+    other = registered_name(opponent)
+    if mine is None or other is None:
+      await interaction.edit_original_response(content="⚠️ 2人とも登録済みのユーザーを指定してください")
+      return
+    models, problems = await get_problem_data()
+    fields = []
+    for name in (mine, other):
+      week = await count_period_ac(name, 7, DB_FILE)
+      score = get_period_score(name, 7, DB_FILE, models)
+      solved = len(get_solved_problems(name, DB_FILE))
+      rating = get_latest_rating_from_db(name, DB_FILE)
+      fields.append((name, f"レート **{rating}**　解いた問題 **{solved}**\n1週間: 総合AC **{week[0]}** / 新規AC **{week[2]}** / スコア **{score}**"))
+    my_solved, other_solved = get_solved_problems(mine, DB_FILE), get_solved_problems(other, DB_FILE)
+    only_other = sorted(other_solved - my_solved, key=lambda p: problem_difficulty(p, models) or 0, reverse=True)
+    if only_other:
+      links = [problem_link(p, problems) for p in only_other[:5]]
+      fields.extend(lines_to_fields(f"{other} だけが解いた問題 ({len(only_other)}問、難しい順)", links))
+    fields.append((f"{mine} だけが解いた問題", f"**{len(my_solved - other_solved)}** 問"))
+    await send_pages_to_interaction(interaction, build_pages(f"⚔️ {mine} vs {other}", 0xE74C3C, interaction.created_at, fields, footer=sync_footer()))
+  except Exception as e:
+    await report_command_error(interaction, "versus", e)
 
 
 ## @brief Slashコマンドのエラーをキャッチしてadminに通知するハンドラ
