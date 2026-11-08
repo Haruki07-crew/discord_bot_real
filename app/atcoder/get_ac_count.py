@@ -1,7 +1,5 @@
-import aiohttp
 import sqlite3
-from datetime import datetime, timezone, timedelta
-import discord_logger
+from atcoder import http_client
 
 async def get_ac_count(atcoder_name, db_file="database.db"):
   with sqlite3.connect(db_file) as conn:
@@ -23,12 +21,9 @@ async def get_ac_count(atcoder_name, db_file="database.db"):
       return row[0] if row else 0
 
   url = f"https://kenkoooo.com/atcoder/atcoder-api/v3/user/ac_rank?user={atcoder_name}"
-  await discord_logger.log_api(f"APIを叩いた: AC数取得 (get_ac_count) [{atcoder_name}]")
-  timeout = aiohttp.ClientTimeout(total=30, connect=10, sock_read=20)
-  async with aiohttp.ClientSession() as session:
-    async with session.get(url, timeout=timeout) as resp:
-      if resp.status == 404:
-        return 0  # kenkoooo は AC が1つも無いユーザー (と存在しないユーザー) に 404 を返す
-      resp.raise_for_status()
-      data = await resp.json(content_type=None)
+  status, data = await http_client.get(url, log=f"AC数取得 [{atcoder_name}]")
+  if status == 404:
+    return 0  # kenkoooo は AC が1つも無いユーザー (と存在しないユーザー) に 404 を返す
+  if status != 200:
+    raise RuntimeError(f"HTTP {status}: {url}")
   return data["count"]

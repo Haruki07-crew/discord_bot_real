@@ -1,5 +1,5 @@
-import aiohttp
-import discord_logger
+from atcoder import http_client
+
 
 async def atcoder_user_exists(atcoder_name):
   """AtCoderユーザーが存在するかをユーザーページのステータスで判定する。
@@ -10,17 +10,13 @@ async def atcoder_user_exists(atcoder_name):
   戻り値: True (存在する) / False (存在しない) / None (通信エラー等で判定不能)
   """
   url = f"https://atcoder.jp/users/{atcoder_name}"
-  await discord_logger.log_api(f"APIを叩いた: ユーザー存在確認 (atcoder_user_exists) [{atcoder_name}]")
-  headers = {"User-Agent": "Mozilla/5.0 (compatible; AtCoderBot/1.0)"}
-  timeout = aiohttp.ClientTimeout(total=30, connect=10, sock_read=20)
   try:
-    async with aiohttp.ClientSession(headers=headers) as session:
-      async with session.get(url, timeout=timeout, allow_redirects=True) as resp:
-        if resp.status == 200:
-          return True
-        if resp.status == 404:
-          return False
-        return None
+    status, _ = await http_client.get(url, log=f"ユーザー存在確認 [{atcoder_name}]", parse_json=False)
   except Exception as e:
     print(f"[atcoder_user_exists] {atcoder_name}: {type(e).__name__}: {e}")
     return None
+  if status == 200:
+    return True
+  if status == 404:
+    return False
+  return None

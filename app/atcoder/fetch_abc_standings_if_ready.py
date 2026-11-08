@@ -1,7 +1,6 @@
-import aiohttp
 import time
 from atcoder.parse_atcoder_time import parse_atcoder_time
-import discord_logger
+from atcoder import http_client
 from atcoder.build_abc_standings import build_abc_standings
 
 async def fetch_abc_standings_if_ready(contest_number, db_file):
@@ -12,15 +11,8 @@ async def fetch_abc_standings_if_ready(contest_number, db_file):
   """
   contest_id = f"abc{contest_number:03d}"
   url = f"https://atcoder.jp/contests/{contest_id}/results/json"
-  await discord_logger.log_api(f"APIを叩いた: ABCスタンディング取得 [{contest_id}]")
-
   try:
-    headers = {"User-Agent": "Mozilla/5.0 (compatible; AtCoderBot/1.0)"}
-    timeout = aiohttp.ClientTimeout(total=30, connect=10, sock_read=20)
-    async with aiohttp.ClientSession(headers=headers) as session:
-      async with session.get(url, timeout=timeout) as resp:
-        resp.raise_for_status()
-        data = await resp.json(content_type=None)
+    data = await http_client.get_json(url, log=f"ABCスタンディング取得 [{contest_id}]")
   except Exception:
     return None
 

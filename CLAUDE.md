@@ -20,6 +20,7 @@ Python 3.11 (Docker と同じ)。依存は requirements.txt。pytest は使わ�
 - `app/atcoder/` — 1関数1ファイル。`__init__.py` で re-export し、main.py は `from atcoder import *`
   - 新しい関数を足したら `__init__.py` の import と `__all__` の両方に追加する
 - `app/config.py` — 環境変数 (`DISCORD_TOKEN` `ADMIN_ID` `RANKING_CHANNEL_ID` `LOG_CHANNEL_ID` `DB_PATH`)
+- `app/atcoder/http_client.py` — 外部APIへのリクエストはすべてここを通す (同じホストへは1秒に1回まで)
 - `app/discord_logger.py` — API 呼び出しログを5秒ごとにまとめて Discord に送る (処理は送信を待たない)
 - `tests/` — `support.py` が main.py を Discord に接続せずに読み込む。偽の Channel / Interaction を使う
 - DB は SQLite 1ファイル (`DB_PATH`)。テーブル定義は `app/atcoder/init_*.py`
@@ -50,6 +51,5 @@ Python 3.11 (Docker と同じ)。依存は requirements.txt。pytest は使わ�
 - ユーザー数に比例して API を叩く設計 (`refresh_users_data` を集計前に呼ぶ)。1000人規模ではコマンドが15分の応答期限を超える。
   バックグラウンド同期 + コマンドは DB を読むだけ、への移行を予定。
 - `with sqlite3.connect()` は接続を閉じない (commit/rollback のみ)。`contextlib.closing` 等で閉じるべき。
-- 使われていないモジュールがある (count_period_ac2, get_latest_rating*, is_contest_auto_posted など)。
 - 再ACも「今日のAC数」に数える (仕様として未決定)。
 - requirements.txt のバージョンが固定されていない (ビルドするたびに discord.py などが変わりうる)。

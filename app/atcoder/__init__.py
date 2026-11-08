@@ -1,99 +1,64 @@
-from atcoder.get_latest_rating import get_latest_rating
-from atcoder.get_latest_rating_nofstring import get_latest_rating_nofstring
-from atcoder.get_rate_heart import get_rate_heart
-from atcoder.get_latest_rating_from_db import get_latest_rating_from_db
-from atcoder.get_ac_count import get_ac_count
-from atcoder.count_period_ac import count_period_ac
-from atcoder.count_period_ac2 import count_period_ac2
-from atcoder.AC_fight import AC_fight
-from atcoder.make_growth_ranking import make_growth_ranking
-from atcoder.fetch_problem import fetch_problem
-from atcoder.get_diff import get_diff
+"""AtCoder のデータ取得・集計・グラフ作成。main.py は `from atcoder import *` で使う。
+新しい関数を足したら、下の import と __all__ の両方に追加する。"""
+
+# ユーザー管理
+from atcoder.init_db import init_db
 from atcoder.init_progress_tables import init_progress_tables
-from atcoder.parse_atcoder_time import parse_atcoder_time
+from atcoder.register_user import register_user
+from atcoder.delete_user import delete_user
+from atcoder.get_user_dict import get_user_dict
+from atcoder.get_registered_user import get_registered_user
+from atcoder.get_register_id import get_register_id
+from atcoder.atcoder_user_exists import atcoder_user_exists
+
+# データ取得・キャッシュ
 from atcoder.fetch_and_cache_contest_history import fetch_and_cache_contest_history
 from atcoder.fetch_and_cache_ac_submissions import fetch_and_cache_ac_submissions
 from atcoder.initial_fetch_user_data import initial_fetch_user_data, refresh_users_data
-from atcoder.get_progress_data import get_progress_data
-from atcoder.create_progress_graph import create_progress_graph
-from atcoder.get_ac_rate_change_data import get_ac_rate_change_data
-from atcoder.create_ac_rate_graph import create_ac_rate_graph
-from atcoder.get_abc_standings import get_abc_standings
-from atcoder.fetch_abc_standings_if_ready import fetch_abc_standings_if_ready
-from atcoder.get_prev_contest import get_prev_contest
-from atcoder.set_prev_contest import set_prev_contest
-from atcoder.init_db import init_db
-from atcoder.get_user_dict import get_user_dict
-from atcoder.get_registered_user import get_registered_user
-from atcoder.register_user import register_user
-from atcoder.get_register_id import get_register_id
-from atcoder.delete_user import delete_user
-from atcoder.get_all_users_with_discord_id import get_all_users_with_discord_id
-from atcoder.is_contest_auto_posted import is_contest_auto_posted
-from atcoder.mark_contest_auto_posted import mark_contest_auto_posted
-from atcoder.get_latest_ended_abc_number import get_latest_ended_abc_number
-from atcoder.weekly_cycle_helpers import get_weekly_cycle_state, advance_weekly_cycle, save_weekly_snapshot, get_weekly_snapshots, get_weekly_last_posted, set_weekly_last_posted
-from atcoder.create_weekly_graph import create_weekly_graph
-from atcoder.get_contest_ac_count import get_contest_ac_count
-from atcoder.get_contest_end_time import get_contest_end_time_unix
-from atcoder.get_ac_streak import get_ac_streak
-from atcoder.atcoder_user_exists import atcoder_user_exists
-
-CONTEST_CACHE_TTL = 3600
-
-async def get_abc_graph_data():
-  return None
-
 from atcoder.backup_database import backup_database
 
+# 集計
+from atcoder.parse_atcoder_time import parse_atcoder_time
+from atcoder.get_ac_count import get_ac_count
+from atcoder.count_period_ac import count_period_ac, get_period_start_unix
+from atcoder.AC_fight import AC_fight
+from atcoder.make_growth_ranking import make_growth_ranking
+from atcoder.get_ac_rate_change_data import get_ac_rate_change_data
+from atcoder.get_progress_data import get_progress_data
+from atcoder.get_ac_streak import get_ac_streak
+from atcoder.get_latest_rating_from_db import get_latest_rating_from_db
+from atcoder.get_rate_heart import get_rate_heart
+
+# グラフ
+from atcoder.create_ac_rate_graph import create_ac_rate_graph
+from atcoder.create_progress_graph import create_progress_graph
+from atcoder.create_weekly_graph import create_weekly_graph
+
+# ABC コンテスト
+from atcoder.get_abc_standings import get_abc_standings
+from atcoder.fetch_abc_standings_if_ready import fetch_abc_standings_if_ready
+from atcoder.get_contest_ac_count import get_contest_ac_count
+from atcoder.get_latest_ended_abc_number import get_latest_ended_abc_number
+from atcoder.get_prev_contest import get_prev_contest
+from atcoder.set_prev_contest import set_prev_contest
+
+# 週次サイクル
+from atcoder.weekly_cycle_helpers import (
+  get_weekly_cycle_state, advance_weekly_cycle, save_weekly_snapshot, get_weekly_snapshots,
+  get_weekly_last_posted, set_weekly_last_posted,
+)
+
 __all__ = [
-  "get_latest_rating",
-  "get_latest_rating_nofstring",
-  "get_rate_heart",
-  "get_latest_rating_from_db",
-  "get_ac_count",
-  "count_period_ac",
-  "count_period_ac2",
-  "AC_fight",
-  "make_growth_ranking",
-  "fetch_problem",
-  "get_diff",
-  "CONTEST_CACHE_TTL",
-  "init_progress_tables",
-  "parse_atcoder_time",
-  "fetch_and_cache_contest_history",
-  "fetch_and_cache_ac_submissions",
-  "initial_fetch_user_data",
-  "refresh_users_data",
-  "get_progress_data",
-  "create_progress_graph",
-  "get_ac_rate_change_data",
-  "create_ac_rate_graph",
-  "get_abc_standings",
-  "fetch_abc_standings_if_ready",
-  "get_prev_contest",
-  "set_prev_contest",
-  "get_abc_graph_data",
-  "get_latest_ended_abc_number",
-  "init_db",
-  "get_user_dict",
-  "get_registered_user",
-  "register_user",
-  "get_register_id",
-  "delete_user",
-  "get_all_users_with_discord_id",
-  "is_contest_auto_posted",
-  "mark_contest_auto_posted",
-  "get_weekly_cycle_state",
-  "advance_weekly_cycle",
-  "save_weekly_snapshot",
-  "get_weekly_snapshots",
-  "get_weekly_last_posted",
-  "set_weekly_last_posted",
-  "create_weekly_graph",
-  "get_contest_ac_count",
-  "get_contest_end_time_unix",
-  "get_ac_streak",
-  "atcoder_user_exists",
-  "backup_database",
+  "init_db", "init_progress_tables", "register_user", "delete_user", "get_user_dict",
+  "get_registered_user", "get_register_id", "atcoder_user_exists",
+  "fetch_and_cache_contest_history", "fetch_and_cache_ac_submissions",
+  "initial_fetch_user_data", "refresh_users_data", "backup_database",
+  "parse_atcoder_time", "get_ac_count", "count_period_ac", "get_period_start_unix", "AC_fight",
+  "make_growth_ranking", "get_ac_rate_change_data", "get_progress_data", "get_ac_streak",
+  "get_latest_rating_from_db", "get_rate_heart",
+  "create_ac_rate_graph", "create_progress_graph", "create_weekly_graph",
+  "get_abc_standings", "fetch_abc_standings_if_ready", "get_contest_ac_count",
+  "get_latest_ended_abc_number", "get_prev_contest", "set_prev_contest",
+  "get_weekly_cycle_state", "advance_weekly_cycle", "save_weekly_snapshot", "get_weekly_snapshots",
+  "get_weekly_last_posted", "set_weekly_last_posted",
 ]

@@ -194,6 +194,29 @@ class TestBackup(Base):
     self.assertIn(os.path.basename(path), remaining)
 
 
+class TestRateLimit(unittest.TestCase):
+  def test_same_host_is_spaced_and_other_hosts_are_not(self):
+    from atcoder import http_client
+    original = http_client.MIN_INTERVAL_SEC
+    http_client.MIN_INTERVAL_SEC = 0.2
+    try:
+      async def run():
+        stamps = []
+        async def hit(host):
+          await http_client.wait_turn(host)
+          stamps.append((host, time.monotonic()))
+        await asyncio.gather(*(hit("a.example") for _ in range(4)), hit("b.example"))
+        return stamps
+      stamps = asyncio.run(run())
+    finally:
+      http_client.MIN_INTERVAL_SEC = original
+    a = sorted(t for h, t in stamps if h == "a.example")
+    gaps = [b - a_ for a_, b in zip(a, a[1:])]
+    self.assertTrue(all(g >= 0.19 for g in gaps), gaps)
+    b_time = [t for h, t in stamps if h == "b.example"][0]
+    self.assertLess(b_time - a[0], 0.1)  # 別ホストは待たされない
+
+
 class TestLogger(unittest.TestCase):
   def test_chunks_fit_discord_limit(self):
     import discord_logger

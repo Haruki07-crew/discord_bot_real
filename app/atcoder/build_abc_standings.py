@@ -1,4 +1,3 @@
-import asyncio
 import sqlite3
 from atcoder.get_contest_ac_count import get_contest_ac_count
 from atcoder.parse_atcoder_time import parse_atcoder_time
@@ -29,9 +28,8 @@ async def build_abc_standings(results, contest_number, db_file):
     if user is not None:
       participants.append((entry, user))
 
-  for i, (_entry, (atcoder_name, _discord_name)) in enumerate(participants):
-    if i > 0:
-      await asyncio.sleep(1.0)
+  # 1秒に1回の制限は http_client が守るので、ここでは待たない
+  for _entry, (atcoder_name, _discord_name) in participants:
     try:
       await fetch_and_cache_ac_submissions(atcoder_name, db_file)
     except Exception as e:
