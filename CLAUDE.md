@@ -45,10 +45,10 @@ Python 3.11 (Docker と同じ)。依存は requirements.txt。pytest は使わ�
 - 投稿の送信は失敗しうる。自動投稿は `send_with_retry()` を使い、送信成功後に状態 (prev_contest など) を進める。
 - 期間は `get_period_start_unix(day)` に統一する。「今日を含めて day 日分」。
 - AC の数え方 (決定済み): 総合AC = (問題, JSTの日付) ごとに1回 (別の日の解き直しは数える)、新規AC = 期間内に初めて AC した問題。`count_period_ac` が [総合AC, 点数, 新規AC] を返す。
+- DB には `from atcoder import db` → `with db.connect(db_file) as conn:` で接続する (`sqlite3.connect` を直接 with で使うと接続が閉じない)。
+- 依存パッケージは requirements.txt でバージョンを固定している。上げるときは Python 3.11 でテストを通してから。
 - AtCoder のユーザー名は大文字小文字を区別しない。比較は `COLLATE NOCASE` か `.lower()`。
 - ユーザー入力の AtCoder 名は URL に入れる前に `is_valid_atcoder_name()` で検査する。
 
 ## 既知の課題 (直すときは別PRで)
 
-- `with sqlite3.connect()` は接続を閉じない (commit/rollback のみ)。`contextlib.closing` 等で閉じるべき。
-- requirements.txt のバージョンが固定されていない (ビルドするたびに discord.py などが変わりうる)。

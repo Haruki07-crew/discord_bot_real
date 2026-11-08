@@ -1,9 +1,10 @@
+from atcoder import db
 import sqlite3
 from atcoder.init_progress_tables import init_progress_tables
 from atcoder.init_auto_post_table import init_auto_post_table
 
 def init_db(db_file):
-  with sqlite3.connect(db_file) as conn:
+  with db.connect(db_file) as conn:
     cursor = conn.cursor()
     cursor.execute("""
       CREATE TABLE IF NOT EXISTS users (
@@ -18,7 +19,7 @@ def init_db(db_file):
     except sqlite3.OperationalError:
       pass
     conn.commit()
-  with sqlite3.connect(db_file) as conn:
+  with db.connect(db_file) as conn:
     try:
       conn.execute("ALTER TABLE ac_submissions_cache ADD COLUMN point INTEGER DEFAULT 0")
       conn.commit()

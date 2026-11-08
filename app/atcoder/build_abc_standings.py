@@ -1,3 +1,4 @@
+from atcoder import db
 import sqlite3
 from atcoder.get_contest_ac_count import get_contest_ac_count
 from atcoder.parse_atcoder_time import parse_atcoder_time
@@ -13,7 +14,7 @@ async def build_abc_standings(results, contest_number, db_file):
   - コンテスト終了時刻は results/json の EndTime を使う
     (contest_history は daily_update まで更新されず、unrated 参加者の行も無いため)
   """
-  with sqlite3.connect(db_file) as conn:
+  with db.connect(db_file) as conn:
     cursor = conn.cursor()
     cursor.execute("SELECT atcoder_name, discord_name FROM users")
     users_by_lower = {row[0].lower(): (row[0], row[1]) for row in cursor.fetchall()}

@@ -1,7 +1,8 @@
+from atcoder import db
 import sqlite3
 
 def init_progress_tables(db_file):
-  with sqlite3.connect(db_file) as conn:
+  with db.connect(db_file) as conn:
     cursor = conn.cursor()
     cursor.execute("""
       CREATE TABLE IF NOT EXISTS contest_history (

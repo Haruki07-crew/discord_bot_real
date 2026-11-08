@@ -1,8 +1,9 @@
+from atcoder import db
 import sqlite3
 from atcoder import http_client
 
 async def get_ac_count(atcoder_name, db_file="database.db"):
-  with sqlite3.connect(db_file) as conn:
+  with db.connect(db_file) as conn:
     cursor = conn.cursor()
     cursor.execute(
       "SELECT submission_last_id, submission_last_fetch FROM update_bookmark WHERE atcoder_name = ?",
