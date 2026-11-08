@@ -9,6 +9,7 @@ AtCoder の精進 (AC数・点数) とレート変化を集計し、Discord に�
 python -m unittest discover -s tests -v   # オフラインテスト (ネットワーク・Discord 不要)。変更後は必ず実行
 python -m py_compile app/main.py          # 構文チェック (hook でも自動実行される)
 cd app && python main.py                  # 起動 (本番トークンでは実行しないこと。下記参照)
+docker compose up -d --build              # 本番と同じ構成で起動。本番はラズパイ5 / Azure VM (docs/deploy.md)
 ```
 
 Python 3.11 (Docker と同じ)。依存は requirements.txt。pytest は使わず標準の unittest。
@@ -31,7 +32,7 @@ Python 3.11 (Docker と同じ)。依存は requirements.txt。pytest は使わ�
 - **本番トークンでローカル起動しない。** 本番の Bot と2つ同時に動き、自動投稿が二重になる。
   動作確認は tests/ のオフラインテストか、テスト用 Bot のトークンで行う。
 - **`.env` と `database.db` をコミットしない** (.gitignore 済み)。トークンをコードやログに書かない。
-- **main への push = 本番デプロイ。** 必ずブランチ → テスト → PR → マージの順で行う (`/ship` skill)。
+- **main への push = 本番デプロイ** (本番機が5分ごとに main を取り込む)。 必ずブランチ → テスト → PR → マージの順で行う (`/ship` skill)。
 
 ## コードの書き方
 
@@ -51,3 +52,4 @@ Python 3.11 (Docker と同じ)。依存は requirements.txt。pytest は使わ�
 - `with sqlite3.connect()` は接続を閉じない (commit/rollback のみ)。`contextlib.closing` 等で閉じるべき。
 - 使われていないモジュールがある (count_period_ac2, get_latest_rating*, is_contest_auto_posted など)。
 - 再ACも「今日のAC数」に数える (仕様として未決定)。
+- requirements.txt のバージョンが固定されていない (ビルドするたびに discord.py などが変わりうる)。

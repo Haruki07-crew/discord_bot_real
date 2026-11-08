@@ -1,0 +1,17 @@
+# ラズパイ / Azure VM などで Bot を常時動かすための設定。使い方は docs/deploy.md
+services:
+  bot:
+    build: .
+    image: atcoder-bot
+    container_name: atcoder-bot
+    restart: unless-stopped          # 落ちても、マシンを再起動しても自動で立ち上がる
+    env_file: app/.env               # DISCORD_TOKEN などはイメージに入れず、ここから渡す
+    environment:
+      DB_PATH: /data/database.db     # DB は下の ./data に保存されるので、作り直しても消えない
+    volumes:
+      - ./data:/data                 # ./data/database.db と ./data/backups/ (毎日のバックアップ)
+    logging:                         # ログが SD カードを埋め尽くさないように上限を設ける
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"

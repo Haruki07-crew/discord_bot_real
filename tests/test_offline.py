@@ -177,6 +177,23 @@ class TestWeekly(Base):
     self.assertTrue(any(t and "Diligence" in t for t in self.rec.titles()))
 
 
+class TestBackup(Base):
+  def test_backup_keeps_latest(self):
+    import os
+    from atcoder.backup_database import backup_database
+    add_user(self.db, "gina")
+    path = backup_database(self.db, keep=2)
+    with sqlite3.connect(path) as c:
+      self.assertEqual(c.execute("SELECT atcoder_name FROM users").fetchall(), [("gina",)])
+    backup_dir = os.path.dirname(path)
+    for d in ("20000101", "20000102", "20000103"):
+      open(os.path.join(backup_dir, f"database-{d}.db"), "w").close()
+    backup_database(self.db, keep=2)
+    remaining = sorted(f for f in os.listdir(backup_dir) if f.startswith("database-"))
+    self.assertEqual(len(remaining), 2)
+    self.assertIn(os.path.basename(path), remaining)
+
+
 class TestLogger(unittest.TestCase):
   def test_chunks_fit_discord_limit(self):
     import discord_logger

@@ -44,6 +44,8 @@ CONTEST_CACHE_TTL = 3600
 async def get_abc_graph_data():
   return None
 
+from atcoder.backup_database import backup_database
+
 __all__ = [
   "get_latest_rating",
   "get_latest_rating_nofstring",
@@ -93,4 +95,5 @@ __all__ = [
   "get_contest_end_time_unix",
   "get_ac_streak",
   "atcoder_user_exists",
+  "backup_database",
 ]

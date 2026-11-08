@@ -186,6 +186,12 @@ async def daily_update():
   users = list(get_user_dict(DB_FILE).keys())
   await refresh_users_data(users, DB_FILE, interval=1.5)
   print("[daily_update] Daily update complete")
+  # 1日1回 DB をバックアップする (14日分を残す)。壊れたり消えたりしても前日の状態に戻せるように
+  try:
+    path = backup_database(DB_FILE)
+    print(f"[daily_update] Backup saved: {path}")
+  except Exception as e:
+    print(f"[daily_update] Backup failed: {e}")
 
 
 ## @brief 毎週月曜0:15(JST)に週次ランキングと累積グラフを投稿するタスク
