@@ -79,6 +79,15 @@ app/
 - 自動投稿は `top_fields()` で上位10人 + 「ほか N 人」にし、11人以上なら `ranking_text_file()` で全順位を .txt で添付する (再起動でボタンが効かなくなるため、自動投稿にはボタンを使わない)。
 - グラフは `graph_targets()` (上位10人 + 実行した本人) だけを描く。
 
+## おすすめ・通知・実績
+
+- `atcoder/problem_data.py`: 難易度と問題一覧の取得 (1日1回)、色、精進スコア
+- `atcoder/engagement.py`: おすすめ、スコア集計、レート進捗、次の壁
+- `atcoder/notifications.py`: `notification_prefs` / `achievements` テーブル、DM 希望、アカウントの紐づけ
+- `atcoder/achievements.py`: 実績の判定。初回判定のユーザーは過去の分を投稿せず記録する (`_initialized`)。投稿に成功してから記録する
+- `atcoder/contest_reminder.py`: atcoder.jp の予定表を1時間に1回読み、開始30分前に投稿する (送信済みは `auto_posted_contests` の `reminder:abcNNN`)
+- 定期処理: `abc_reminder_task` (1分) / `achievements_task` (30分) / `streak_reminder_task` (毎日22時) / `weekly_review_task` (月曜9時)
+
 ## 監視
 
 - コマンドの例外は `report_command_error()` で記録・管理者に DM・実行者にエラー表示をまとめて行う。新しいコマンドもこれを使う。

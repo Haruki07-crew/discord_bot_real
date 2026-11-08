@@ -650,6 +650,181 @@ class TestGraphThread(Base):
     self.assertGreater(ticks, 3)  # 描画中もイベントループが回っている
 
 
+class TestEngagement(Base):
+  def setUp(self):
+    super().setUp()
+    self.models = {
+      "abc1_a": {"difficulty": 100}, "abc1_b": {"difficulty": 800}, "abc1_c": {"difficulty": 1000},
+      "abc1_d": {"difficulty": 1200}, "abc1_e": {"difficulty": 1000, "is_experimental": True},
+    }
+    self.problems = {k: {"id": k, "contest_id": "abc1", "title": f"T {k}"} for k in self.models}
+    async def data():
+      return self.models, self.problems
+    self.ns["get_problem_data"] = data
+    self.ns["refresh_users_data"] = no_refresh
+    self.dms = []
+    async def dm(discord_id, text):
+      self.dms.append((discord_id, text))
+      return True
+    self.ns["send_dm"] = dm
+    self.channel = FakeChannel(self.rec)
+    self.ns["client"].get_channel = lambda _id: self.channel
+    self.ns["ranking_channel_id"] = 123
+    add_user(self.db, "alice", "A", uid=5)
+    add_user(self.db, "bob", "B", uid=6)
+
+  def test_colors_and_score(self):
+    from atcoder.problem_data import clip_difficulty, problem_score
+    self.assertEqual(self.ns["color_name"](399), "灰")
+    self.assertEqual(self.ns["color_name"](2399), "黄")
+    self.assertEqual(self.ns["color_name"](2800), "赤")
+    self.assertEqual(self.ns["get_rate_heart"](2400), "🧡")
+    self.assertGreater(clip_difficulty(-800), 0)
+    self.assertEqual(problem_score("abc1_b", self.models), 40)
+    self.assertEqual(problem_score("unknown", self.models), 10)
+
+  def test_problem_links_prefer_original_contest(self):
+    from atcoder.problem_data import index_problems, problem_link
+    rows = [{"id": "abc229_d", "contest_id": "abc229", "title": "D. X"}, {"id": "abc229_d", "contest_id": "adt_all_1", "title": "G. X"}]
+    for ordered in (rows, rows[::-1]):
+      self.assertIn("/contests/abc229/tasks/abc229_d", problem_link("abc229_d", index_problems(ordered)))
+
+  def test_recommendations_skip_solved_and_experimental(self):
+    picks = self.ns["pick_recommendations"](1000, {"abc1_d"}, self.models, self.problems)
+    self.assertEqual([(p[0], p[1]) for p in picks], [("易しめ", "abc1_b"), ("ちょうどいい", "abc1_c")])
+
+  def test_recommend_command(self):
+    add_contest(self.db, "alice", "abc0", today_start() - _dt.timedelta(days=3), 900, 1000)
+    it = FakeInteraction(self.rec, user_id=5)
+    self.run_async(self.ns["recommend"].callback(it))
+    self.assertIn("alice", self.rec.sent[-1][1].title)
+
+  def test_score_counts_only_first_ac(self):
+    t0 = today_start()
+    add_ac(self.db, "alice", 1, "abc1_b", (t0 - _dt.timedelta(days=30)).timestamp())  # 期間前に解いた
+    add_ac(self.db, "alice", 2, "abc1_b", t0.timestamp() + 1)                         # 解き直し
+    add_ac(self.db, "alice", 3, "abc1_d", t0.timestamp() + 2)
+    self.assertEqual(self.ns["get_period_score"]("alice", 7, self.db, self.models), 80)
+
+  def test_score_ranking_and_color_filter(self):
+    add_contest(self.db, "alice", "abc0", today_start() - _dt.timedelta(days=3), 900, 1000)
+    add_contest(self.db, "bob", "abc0", today_start() - _dt.timedelta(days=3), 1200, 1300)
+    add_ac(self.db, "alice", 1, "abc1_d", today_start().timestamp() + 1)
+    import discord
+    Choice = discord.app_commands.Choice
+    it = FakeInteraction(self.rec, user_id=5)
+    self.run_async(self.ns["diligence_score"].callback(it, Choice(name="1週間", value=7), Choice(name="水色", value="水")))
+    embed = self.rec.sent[-1][1]
+    self.assertEqual([f.name for f in embed.fields], ["1位 : bob(B)"])
+
+  def test_versus(self):
+    add_ac(self.db, "bob", 1, "abc1_d", today_start().timestamp() + 1)
+    it = FakeInteraction(self.rec, user_id=5)
+    self.run_async(self.ns["versus"].callback(it, "BOB"))
+    text = " ".join(f.name + f.value for f in self.rec.sent[-1][1].fields)
+    self.assertIn("bob だけが解いた問題 (1問", text)
+    self.assertIn("/contests/abc1/tasks/abc1_d", text)
+
+  def test_rating_progress(self):
+    add_contest(self.db, "alice", "abc0", today_start() - _dt.timedelta(days=9), 900, 1000)
+    add_contest(self.db, "alice", "abc2", today_start() - _dt.timedelta(days=3), 1000, 1157)
+    text = self.ns["rating_progress_text"]("alice", self.db)
+    self.assertIn("水色まであと **43**", text)
+    self.assertIn("1000 → 1157", text)
+    self.assertIsNone(self.ns["rating_progress_text"]("bob", self.db))
+
+  def test_parse_and_remind_once(self):
+    from atcoder.contest_reminder import parse_upcoming_abc
+    page = ('<div id="contest-table-upcoming"><table><tbody><tr><td><time class="x">2026-11-14 21:00:00+0900</time></td>'
+            '<td><a href="/contests/abc484">AtCoder Beginner Contest 484</a></td></tr>'
+            '<tr><td><time>2026-11-08 21:00:00+0900</time></td><td><a href="/contests/agc079">AGC</a></td></tr></tbody></table></div>')
+    parsed = parse_upcoming_abc(page)
+    self.assertEqual([c["id"] for c in parsed], ["abc484"])
+    upcoming = [{"id": "abc484", "title": "ABC 484", "start": int(time.time()) + 600}]
+    async def get():
+      return upcoming
+    self.ns["get_upcoming_abc"] = get
+    self.run_async(self.ns["abc_reminder_task"].coro())
+    self.run_async(self.ns["abc_reminder_task"].coro())
+    self.assertEqual(len(self.rec.sent), 1)
+    self.assertIn("ABC 484", self.rec.sent[0][2])
+    upcoming[0].update(id="abc485", start=int(time.time()) + 3600)
+    self.run_async(self.ns["abc_reminder_task"].coro())
+    self.assertEqual(len(self.rec.sent), 1)  # 30分より前は送らない
+
+  def test_achievements_backfill_silently_then_post_once(self):
+    add_ac(self.db, "alice", 1, "abc1_b", today_start().timestamp() - 5)
+    self.run_async(self.ns["achievements_task"].coro())
+    self.assertEqual(self.rec.sent, [])  # 過去の分は投稿しない
+    add_ac(self.db, "alice", 2, "abc1_d", today_start().timestamp() - 4)
+    self.run_async(self.ns["achievements_task"].coro())
+    self.run_async(self.ns["achievements_task"].coro())
+    self.assertEqual(len(self.rec.sent), 1)
+    self.assertIn("初の水diff", self.rec.sent[0][1].fields[0].value)
+
+  def test_achievement_is_retried_when_post_fails(self):
+    self.run_async(self.ns["achievements_task"].coro())
+    add_ac(self.db, "alice", 1, "abc1_d", today_start().timestamp() - 4)
+    self.channel.fail_times = 1
+    self.run_async(self.ns["achievements_task"].coro())
+    self.run_async(self.ns["achievements_task"].coro())
+    self.assertEqual(len(self.rec.sent), 1)
+
+  def test_streak_reminder(self):
+    it = FakeInteraction(self.rec, user_id=5)
+    import discord
+    kind = discord.app_commands.Choice(name="連続", value="streak")
+    self.run_async(self.ns["notify"].callback(it, kind, True))
+    t0 = today_start()
+    add_ac(self.db, "alice", 1, "abc1_a", (t0 - _dt.timedelta(days=1)).timestamp())
+    self.run_async(self.ns["streak_reminder_task"].coro())
+    self.run_async(self.ns["streak_reminder_task"].coro())  # 同じ日は1回だけ
+    self.assertEqual(len(self.dms), 1)
+    self.assertEqual(self.dms[0][0], 5)
+    self.assertIn("連続1日", self.dms[0][1])
+
+  def test_no_streak_reminder_after_ac_today(self):
+    self.ns["set_notification"](5, "alice", "streak", True, self.db)
+    t0 = today_start()
+    add_ac(self.db, "alice", 1, "abc1_a", (t0 - _dt.timedelta(days=1)).timestamp())
+    add_ac(self.db, "alice", 2, "abc1_b", t0.timestamp() + 1)
+    self.run_async(self.ns["streak_reminder_task"].coro())
+    self.assertEqual(self.dms, [])
+
+  def test_weekly_review(self):
+    monday = today_start() - _dt.timedelta(days=today_start().weekday())
+    freeze_now(self.ns, monday + _dt.timedelta(hours=9))
+    self.ns["set_notification"](5, "alice", "weekly_review", True, self.db)
+    self.ns["set_prev_contest"](2, self.db)
+    add_ac(self.db, "alice", 1, "abc1_a", (monday - _dt.timedelta(days=1)).timestamp())
+    if today_start().weekday() == 0:
+      self.run_async(self.ns["weekly_review_task"].coro())
+      self.run_async(self.ns["weekly_review_task"].coro())
+      self.assertEqual(len(self.dms), 1)
+    text = self.run_async(self.ns["build_weekly_review"]("alice", int(monday.timestamp()), self.models))
+    self.assertIn("alice", text)
+
+  def test_weak_slot(self):
+    add_ac(self.db, "alice", 1, "abc001_a", 1)
+    add_ac(self.db, "alice", 2, "abc002_a", 1)
+    self.assertEqual(self.ns["next_wall_slot"]("alice", 2, self.db), ("B", 0.0))
+
+  def test_user_link_enables_notify(self):
+    self.ns["admin_id"] = "999"
+    import types
+    admin = FakeInteraction(self.rec, user_id=999)
+    self.run_async(self.ns["user_link"].callback(admin, "ALICE", types.SimpleNamespace(id=77)))
+    self.assertEqual(self.ns["get_registered_by_discord_id"](77, self.db), "alice")
+
+  def test_unregister_removes_preferences(self):
+    self.ns["set_notification"](5, "alice", "streak", True, self.db)
+    self.ns["record_achievements"]([("alice", "ac:100")], self.db)
+    self.ns["delete_user"]("alice", self.db)
+    self.assertEqual(self.ns["get_notification_targets"]("streak", self.db), [])
+    with dbconn(self.db) as c:
+      self.assertEqual(c.execute("SELECT COUNT(*) FROM achievements").fetchone()[0], 0)
+
+
 class TestLogger(unittest.TestCase):
   def test_chunks_fit_discord_limit(self):
     import discord_logger
