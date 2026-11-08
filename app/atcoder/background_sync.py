@@ -1,3 +1,4 @@
+from atcoder import db
 """ユーザーのデータを少しずつ同期し続けるバックグラウンド処理。
 
 コマンドのたびに全員分を取り直すと、人数に比例して時間がかかり (1000人で15分以上)、
@@ -48,7 +49,7 @@ async def sync_step(db_file, now=None):
   """同期が必要なユーザーを種類ごとに1人ずつ更新する。戻り値: {"submission": 名前 or None, "contest": 名前 or None}"""
   now = time.time() if now is None else now
   picked = {}
-  with closing(sqlite3.connect(db_file)) as conn:
+  with db.connect(db_file) as conn:
     for kind, (column, interval) in _KINDS.items():
       picked[kind] = None if now < _pause_until[kind] else _most_stale_user(conn, column, now - interval)
 
@@ -65,7 +66,7 @@ async def sync_step(db_file, now=None):
       print(f"[background_sync] {type(r).__name__}: {r}")
 
   # 取得時刻が更新されていなければ失敗とみなして、その種類をしばらく止める
-  with closing(sqlite3.connect(db_file)) as conn:
+  with db.connect(db_file) as conn:
     for kind, (column, _interval) in _KINDS.items():
       name = picked[kind]
       if name and _fetched_at(conn, column, name) < now:
@@ -76,7 +77,7 @@ async def sync_step(db_file, now=None):
 
 def request_contest_resync(atcoder_names, db_file):
   """コンテスト履歴を次の同期で優先して取り直すよう印を付ける (レート確定直後など)。"""
-  with closing(sqlite3.connect(db_file)) as conn:
+  with db.connect(db_file) as conn:
     conn.executemany(
       "UPDATE update_bookmark SET contest_last_fetched = 0 WHERE atcoder_name = ? COLLATE NOCASE",
       [(n,) for n in atcoder_names],
@@ -86,7 +87,7 @@ def request_contest_resync(atcoder_names, db_file):
 
 def get_oldest_submission_sync(db_file):
   """登録ユーザーのうち、提出の同期が一番古い時刻 (Unix秒)。ユーザーがいなければ None。"""
-  with closing(sqlite3.connect(db_file)) as conn:
+  with db.connect(db_file) as conn:
     row = conn.execute("""
       SELECT MIN(COALESCE(b.submission_last_fetch, 0)) FROM users u
       LEFT JOIN update_bookmark b ON b.atcoder_name = u.atcoder_name

@@ -1,3 +1,4 @@
+from atcoder import db
 import sqlite3
 
 async def get_ac_rate_change_data(user_dict, days, db_file, end_unix=None):
@@ -9,7 +10,7 @@ async def get_ac_rate_change_data(user_dict, days, db_file, end_unix=None):
   result = {}
   for atcoder_name, discord_name in user_dict.items():
     try:
-      with sqlite3.connect(db_file) as conn:
+      with db.connect(db_file) as conn:
         cursor = conn.cursor()
         cursor.execute("""
           SELECT end_time, new_rating, old_rating

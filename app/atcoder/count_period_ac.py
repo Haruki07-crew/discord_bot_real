@@ -1,3 +1,4 @@
+from atcoder import db
 import math
 import sqlite3
 from contextlib import closing
@@ -31,7 +32,7 @@ async def count_period_ac(atcoder_name, day, db_file="database.db", end_unix=Non
   period_start_unix = get_period_start_unix(day)
   period_end_unix = end_unix if end_unix is not None else 2**62
 
-  with closing(sqlite3.connect(db_file)) as conn:
+  with db.connect(db_file) as conn:
     meta = conn.execute(
       "SELECT submission_last_id, submission_last_fetch FROM update_bookmark WHERE atcoder_name = ?",
       (atcoder_name,)

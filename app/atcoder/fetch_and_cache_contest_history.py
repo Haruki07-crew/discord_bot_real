@@ -1,3 +1,4 @@
+from atcoder import db
 import sqlite3
 import time
 from datetime import datetime, timezone, timedelta
@@ -11,7 +12,7 @@ async def fetch_and_cache_contest_history(atcoder_name, db_file, force=False):
   """force=True ならキャッシュの有効期限に関係なく再取得する (週次集計の直前など)"""
   now = time.time()
 
-  with sqlite3.connect(db_file) as conn:
+  with db.connect(db_file) as conn:
     cursor = conn.cursor()
     cursor.execute(
       "SELECT contest_last_fetched FROM update_bookmark WHERE atcoder_name = ?",
@@ -35,7 +36,7 @@ async def fetch_and_cache_contest_history(atcoder_name, db_file, force=False):
     url = f"https://atcoder.jp/users/{atcoder_name}/history/json"
     data = await http_client.get_json(url, log=f"コンテスト履歴取得 [{atcoder_name}]")
   except Exception as e:
-    with sqlite3.connect(db_file) as conn:
+    with db.connect(db_file) as conn:
       cursor = conn.cursor()
       cursor.execute("""
         SELECT contest_screen_name, end_time, new_rating, old_rating
@@ -51,7 +52,7 @@ async def fetch_and_cache_contest_history(atcoder_name, db_file, force=False):
   if not isinstance(data, list):
     return []
   rated_contests = [c for c in data if c.get("IsRated", False)]
-  with sqlite3.connect(db_file) as conn:
+  with db.connect(db_file) as conn:
     cursor = conn.cursor()
     for contest in rated_contests:
       cursor.execute("""

@@ -1,3 +1,4 @@
+from atcoder import db
 import sqlite3
 import time
 from datetime import datetime, timezone, timedelta
@@ -13,7 +14,7 @@ REFETCH_MARGIN_SEC = 24 * 60 * 60
 async def fetch_and_cache_ac_submissions(atcoder_name, db_file):
   now = time.time()
 
-  with sqlite3.connect(db_file) as conn:
+  with db.connect(db_file) as conn:
     cursor = conn.cursor()
     cursor.execute(
       "INSERT OR IGNORE INTO update_bookmark (atcoder_name) VALUES (?)",
@@ -37,7 +38,7 @@ async def fetch_and_cache_ac_submissions(atcoder_name, db_file):
   from_epoch = int(last_epoch) if last_epoch and last_epoch > 0 else 0
 
   if from_id and from_epoch == 0:
-    with sqlite3.connect(db_file) as conn:
+    with db.connect(db_file) as conn:
       cursor = conn.cursor()
       cursor.execute(
         "SELECT MAX(epoch_second) FROM ac_submissions_cache WHERE atcoder_name = ?",
@@ -81,7 +82,7 @@ async def fetch_and_cache_ac_submissions(atcoder_name, db_file):
     # 同一秒に500件以上ある場合でも先へ進めるようにする
     last_epoch_second = next_epoch if next_epoch > last_epoch_second else last_epoch_second + 1
 
-  with sqlite3.connect(db_file) as conn:
+  with db.connect(db_file) as conn:
     cursor = conn.cursor()
     if new_submissions:
       cursor.executemany("""

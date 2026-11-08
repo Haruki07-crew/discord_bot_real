@@ -1,3 +1,4 @@
+from atcoder import db
 import sqlite3
 
 async def get_progress_data(atcoder_name, days, db_file, x_axis="ac"):
@@ -9,7 +10,7 @@ async def get_progress_data(atcoder_name, days, db_file, x_axis="ac"):
   try:
     period_start_unix = get_period_start_unix(days)
 
-    with sqlite3.connect(db_file) as conn:
+    with db.connect(db_file) as conn:
       cursor = conn.cursor()
       cursor.execute("""
         SELECT contest_screen_name, end_time, new_rating, old_rating
@@ -47,7 +48,7 @@ async def get_progress_data(atcoder_name, days, db_file, x_axis="ac"):
     if initial_rating is None:
       initial_rating = period_contests[0]["old_rating"]
 
-    with sqlite3.connect(db_file) as conn:
+    with db.connect(db_file) as conn:
       cursor = conn.cursor()
       cursor.execute("""
         SELECT problem_id, epoch_second, point, date(epoch_second, 'unixepoch', '+9 hours') FROM ac_submissions_cache
