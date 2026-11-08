@@ -11,6 +11,7 @@ app/
   main.py                 Botのエントリーポイント。スラッシュコマンド・自動タスクの定義
   config.py               環境変数の読み込み (DISCORD_TOKEN, ADMIN_ID, RANKING_CHANNEL_ID, LOG_CHANNEL_ID, DB_PATH)
   server.py               ヘルスチェック用HTTPサーバー (FastAPI + uvicorn, デーモンスレッド)
+  alerts.py               管理者への DM 通知 (同じ key は cooldown 秒に1回) と直近のエラーの記録
   discord_logger.py       API呼び出しをDiscordチャンネルにログ出力するユーティリティ
   database.db             SQLiteデータベース (実行時に自動生成。DB_PATH で場所を変更可)
   .env                    環境変数ファイル
@@ -76,6 +77,13 @@ app/
 - コマンドの返信は `build_pages()` で1ページ10人に分け、`send_pages_to_interaction()` で送る。2ページ以上なら `PageView` (◀ ▶ ボタン、15分で無効) を付ける。
 - 自動投稿は `top_fields()` で上位10人 + 「ほか N 人」にし、11人以上なら `ranking_text_file()` で全順位を .txt で添付する (再起動でボタンが効かなくなるため、自動投稿にはボタンを使わない)。
 - グラフは `graph_targets()` (上位10人 + 実行した本人) だけを描く。
+
+## 監視
+
+- コマンドの例外は `report_command_error()` で記録・管理者に DM・実行者にエラー表示をまとめて行う。新しいコマンドもこれを使う。
+- 自動タスク (週次・ABC・同期) の失敗も `alerts.notify_admin()` で知らせる。同期は連続10回失敗で通知し、成功したら復旧を通知する。
+- `server.py` の `/health` は `bot_health()` を使い、Discord 切断か同期の連続失敗で 503 を返す。compose.yaml の healthcheck が1分ごとに見る。
+- `/bot_status` (管理者のみ、本人にだけ表示) で状態と直近5件のエラーを確認できる。
 
 ## スラッシュコマンド一覧
 

@@ -404,6 +404,87 @@ class TestPaging(Base):
     self.assertIsNone(self.ns["my_rank_text"](FakeInteraction(self.rec, user_id=7), ranking, 2))
 
 
+class TestMonitoring(Base):
+  def setUp(self):
+    super().setUp()
+    import alerts
+    self.alerts = alerts
+    alerts._last_sent.clear()
+    alerts.recent_errors.clear()
+    self.dms = []
+    dms = self.dms
+
+    class Admin:
+      async def send(self, text):
+        dms.append(text)
+
+    class Client:
+      def get_user(self, _id):
+        return Admin()
+    alerts.setup(Client(), "999")
+    import sys
+    self.bs = sys.modules["atcoder.background_sync"]
+    self.bs.fail_streak.update({"submission": 0, "contest": 0})
+    self.ns["_sync_alerted"].clear()
+
+  def tearDown(self):
+    self.alerts.setup(None, None)
+    self.bs.fail_streak.update({"submission": 0, "contest": 0})
+
+  def test_notify_cooldown(self):
+    self.assertTrue(self.run_async(self.alerts.notify_admin("k", "one")))
+    self.assertFalse(self.run_async(self.alerts.notify_admin("k", "two")))
+    self.assertTrue(self.run_async(self.alerts.notify_admin("other", "three")))
+    self.assertEqual(len(self.dms), 2)
+
+  def test_command_error_is_reported(self):
+    def boom(_db):
+      raise RuntimeError("db is broken")
+    self.ns["get_user_dict"] = boom
+    it = FakeInteraction(self.rec)
+    self.run_async(self.ns["everyone_state"].callback(it))
+    self.assertIn("管理者に自動で通知", self.rec.titles()[-1])
+    self.assertIn("/everyone_state", self.dms[0])
+    self.assertIn("db is broken", self.dms[0])
+    self.assertEqual(len(self.alerts.recent_errors), 1)
+
+  def test_sync_alert_and_recovery(self):
+    self.bs.fail_streak["submission"] = 10
+    self.run_async(self.ns["check_sync_alerts"]())
+    self.run_async(self.ns["check_sync_alerts"]())  # 2回目は送らない
+    self.bs.fail_streak["submission"] = 0
+    self.run_async(self.ns["check_sync_alerts"]())
+    self.assertEqual(len(self.dms), 2)
+    self.assertIn("失敗", self.dms[0])
+    self.assertIn("復旧", self.dms[1])
+
+  def test_bot_status_is_admin_only(self):
+    sent = []
+
+    class Resp:
+      async def send_message(self, content=None, embed=None, ephemeral=False):
+        sent.append((content, embed, ephemeral))
+    self.ns["admin_id"] = "999"
+    self.ns["bot_health"] = lambda: (True, {"discord_connected": True, "sync_fail_streak": {"submission": 0, "contest": 0}, "oldest_submission_sync_age_sec": 120, "uptime_sec": 3600})
+    self.ns["client"].latency  # 例外にならないこと
+    for uid in (1, 999):
+      it = FakeInteraction(self.rec, user_id=uid)
+      it.response = Resp()
+      self.run_async(self.ns["bot_status"].callback(it))
+    self.assertIn("管理者だけ", sent[0][0])
+    self.assertTrue(sent[1][2])  # 本人にだけ見える
+    self.assertIn("提出データの古さ (最大): 2分", sent[1][1].description)
+
+  def test_health_endpoint(self):
+    import server
+    server.health_provider = lambda: (False, {"discord_connected": False})
+    resp = self.run_async(server.health())
+    self.assertEqual(resp.status_code, 503)
+    server.health_provider = lambda: (True, {"discord_connected": True})
+    self.assertEqual(self.run_async(server.health()).status_code, 200)
+    server.health_provider = None
+
+
 class TestLogger(unittest.TestCase):
   def test_chunks_fit_discord_limit(self):
     import discord_logger

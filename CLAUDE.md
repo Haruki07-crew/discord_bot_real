@@ -39,8 +39,9 @@ Python 3.11 (Docker と同じ)。依存は requirements.txt。pytest は使わ�
 ## コードの書き方
 
 - インデントは2スペース。コメントとユーザー向けメッセージは日本語。
-- コマンドは `await interaction.response.defer()` してから処理し、例外は捕まえて
-  「⚠️ エラーが発生しました…」を返す (既存コマンドと同じ形)。新規作成は `/add-command` skill を参照。
+- コマンドは `await interaction.response.defer()` してから処理し、例外は `report_command_error()` に渡す
+  (記録・管理者への DM・実行者へのエラー表示をまとめて行う)。新規作成は `/add-command` skill を参照。
+- 自動タスクの失敗は `alerts.notify_admin(key, text)` で管理者に知らせる (同じ key は cooldown に1回)。
 - Embed は直接作らない。コマンドの返信は `build_pages()` + `send_pages_to_interaction()` (1ページ10人、ボタンで切替)、自動投稿は `top_fields()` + `ranking_text_file()` (上位10人 + 全順位の添付)。人数が増えても連投にならないようにする。
 - 投稿の送信は失敗しうる。自動投稿は `send_with_retry()` を使い、送信成功後に状態 (prev_contest など) を進める。
 - 期間は `get_period_start_unix(day)` に統一する。「今日を含めて day 日分」。

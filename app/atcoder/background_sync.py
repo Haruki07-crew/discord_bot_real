@@ -21,6 +21,9 @@ CONTEST_SYNC_SEC = 24 * 60 * 60     # コンテスト履歴はこの間隔ごと
 FAILURE_PAUSE_SEC = 60              # 取得に失敗したら、その種類の同期をしばらく止める (落ちているAPIを叩き続けない)
 
 _pause_until = {"submission": 0.0, "contest": 0.0}
+# 監視用: 連続で失敗した回数と、最後に成功した時刻 (Unix秒)
+fail_streak = {"submission": 0, "contest": 0}
+last_success = {"submission": None, "contest": None}
 
 _KINDS = {
   "submission": ("submission_last_fetch", SUBMISSION_SYNC_SEC),
@@ -69,9 +72,15 @@ async def sync_step(db_file, now=None):
   with db.connect(db_file) as conn:
     for kind, (column, _interval) in _KINDS.items():
       name = picked[kind]
-      if name and _fetched_at(conn, column, name) < now:
+      if not name:
+        continue
+      if _fetched_at(conn, column, name) < now:
         _pause_until[kind] = now + FAILURE_PAUSE_SEC
+        fail_streak[kind] += 1
         print(f"[background_sync] {kind} sync failed for {name}, pausing {FAILURE_PAUSE_SEC}s")
+      else:
+        fail_streak[kind] = 0
+        last_success[kind] = time.time()
   return picked
 
 
