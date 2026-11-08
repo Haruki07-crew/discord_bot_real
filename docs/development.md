@@ -178,14 +178,11 @@ AtCoderユーザーをBotに登録する。管理者以外は1人1アカウン�
 
 ---
 
-## 一括登録メッセージ
+## 一括登録 (/bulk_register)
 
-ADMIN_IDのユーザーが特定のメッセージを送信すると、事前定義されたユーザーを一括登録する。
-
-| メッセージ | 対象 |
-|---|---|
-| テスト用にユーザー登録 | TEST_USERS (11人) - メインメンバー |
-| 他高専テスト用に登録 | OTHER_KOSEN_USERS (9人) - 他高専メンバー |
+管理者が `/bulk_register group:...` を実行すると、`BULK_GROUPS` (main.py の TEST_USERS / OTHER_KOSEN_USERS) をまとめて登録する。
+以前はメッセージ本文で動かしていたが、Message Content Intent が必要になるためスラッシュコマンドにした。
+Bot は `discord.Intents.default()` で動き、特別な許可が必要な Intents は使わない。
 
 ---
 

@@ -200,7 +200,7 @@ docker compose up -d
 | `permission denied while trying to connect to the Docker daemon socket` | `usermod -aG docker` のあとに、ログインし直したか確認する |
 | `git clone` で `Permission denied (publickey)` | Deploy key の登録と `~/.ssh/config` の内容を確認する。`ssh -vT git@github.com` で詳しいログが出る |
 | `docker compose up` で `env file ... not found` | `app/.env` を置いたか確認する (手順4) |
-| Bot がすぐ止まる / 再起動を繰り返す | `docker compose logs --tail 50` でエラーを見る。`PrivilegedIntentsRequired` や `Improper token` なら README の「困ったとき」を参照 |
+| Bot がすぐ止まる / 再起動を繰り返す | `docker compose logs --tail 50` でエラーを見る。`Improper token` なら README の「困ったとき」を参照 |
 | 自動更新されない | `systemctl list-timers` にタイマーがあるか確認する。`journalctl -u atcoder-bot-update -n 50` でログを見る |
 
 ## 参考リンク
