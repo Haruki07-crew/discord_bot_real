@@ -85,3 +85,15 @@ def set_weekly_last_posted(date_str, db_file):
       (date_str,)
     )
     conn.commit()
+
+
+def get_weekly_prepared(db_file):
+  """週次サイクルを進めてスナップショットを保存した日付 (JST, 'YYYY-MM-DD')。投稿に失敗しても残る。"""
+  with db.connect(db_file) as conn:
+    row = conn.execute("SELECT value FROM bot_state WHERE key = 'weekly_prepared'").fetchone()
+  return row[0] if row else None
+
+
+def set_weekly_prepared(date_str, db_file):
+  with db.connect(db_file) as conn:
+    conn.execute("INSERT OR REPLACE INTO bot_state (key, value) VALUES ('weekly_prepared', ?)", (date_str,))

@@ -12,6 +12,10 @@ def backup_database(db_file, keep=14):
   戻り値: 作成したバックアップのパス"""
   backup_dir = os.path.join(os.path.dirname(os.path.abspath(db_file)), "backups")
   os.makedirs(backup_dir, exist_ok=True)
+  # 前回途中で落ちたときの一時ファイルを消す
+  for leftover in os.listdir(backup_dir):
+    if leftover.endswith(".db.tmp"):
+      os.remove(os.path.join(backup_dir, leftover))
   name = f"database-{datetime.now(JST).strftime('%Y%m%d')}.db"
   path = os.path.join(backup_dir, name)
   tmp = path + ".tmp"

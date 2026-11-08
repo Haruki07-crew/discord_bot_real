@@ -225,6 +225,20 @@ def top_fields(fields, note="全員の順位は添付ファイルを見てくだ
   return fields[:PAGE_SIZE] + [(f"…ほか {len(fields) - PAGE_SIZE} 人", note)]
 
 
+## @brief ABC 自動投稿用: 人数で数えて上位 PAGE_SIZE 人だけ載せる
+## @details unrated 参加者は1つのフィールドに何人もまとめて入るので、フィールド数ではなく人数で数える
+def abc_auto_fields(rated, unrated):
+  total = len(rated) + len(unrated)
+  if total <= PAGE_SIZE:
+    return abc_ranking_fields(rated, unrated)
+  shown = rated[:PAGE_SIZE]
+  rest = total - len(shown)
+  note = "全員の順位は添付ファイルを見てください"
+  if unrated:
+    note = f"unrated 参加の {len(unrated)} 人を含みます。{note}"
+  return abc_ranking_fields(shown, []) + [(f"…ほか {rest} 人", note)]
+
+
 ## @brief 実行した人の順位を「あなたの順位」として返す (登録していなければ None)
 def my_rank_text(interaction, ranking, total):
   mine = get_registered_by_discord_id(interaction.user.id, DB_FILE)
@@ -296,6 +310,22 @@ async def report_command_error(interaction, command_name, error, user_message=US
       await interaction.edit_original_response(content=user_message, embed=None)
   except Exception as e:
     print(f"[report_command_error] failed to reply: {e}")
+
+
+## @brief 時間のかかる処理の途中経過を送る
+## @details followup は応答トークンが15分で切れると送れなくなる。切れていたらチャンネルに直接送り、
+##          それも失敗したらログだけ残して処理は続ける (途中経過の送信失敗で登録が止まらないように)
+async def progress_message(interaction, text):
+  try:
+    await interaction.followup.send(text, allowed_mentions=discord.AllowedMentions.none())
+    return
+  except Exception as e:
+    print(f"[progress_message] followup failed: {e}")
+  try:
+    if interaction.channel is not None:
+      await interaction.channel.send(text, allowed_mentions=discord.AllowedMentions.none())
+  except Exception as e:
+    print(f"[progress_message] channel send failed: {e}")
 
 
 ## @brief 管理者 (ADMIN_ID) かどうか
@@ -371,8 +401,9 @@ async def check_sync_alerts():
   for kind, label in SYNC_KIND_LABELS.items():
     streak = sync_module.fail_streak[kind]
     if streak >= SYNC_ALERT_STREAK and kind not in _sync_alerted:
-      _sync_alerted.add(kind)
-      await alerts.notify_admin(f"sync-{kind}", f"{label} の同期が {streak} 回続けて失敗しています。API が落ちている可能性があります", cooldown=6 * 60 * 60)
+      # 実際に通知できたときだけ「通知済み」にする (通知していないのに復旧だけ届かないように)
+      if await alerts.notify_admin(f"sync-{kind}", f"{label} の同期が {streak} 回続けて失敗しています。API が落ちている可能性があります", cooldown=6 * 60 * 60):
+        _sync_alerted.add(kind)
     elif streak == 0 and kind in _sync_alerted:
       _sync_alerted.discard(kind)
       await alerts.notify_admin(f"sync-{kind}-recovered", f"✅ {label} の同期が復旧しました", cooldown=0)
@@ -473,40 +504,46 @@ async def _post_weekly_ranking():
       print("[weekly_ranking_post] No registered users, skipping")
       return
 
-    # 日曜深夜の提出が同期されていない可能性があるので、集計前に全員分を更新する
-    # (投稿は自動タスクなので、人数に比例して時間がかかっても応答期限の問題はない)
-    # レートは終了から遅れて確定するため、コンテスト履歴はキャッシュを使わず取り直す
-    # (取り直さないと、日曜深夜に確定したレート変化がどの週にも入らない)
-    await refresh_users_data(list(user), DB_FILE, force_contest=True)
-    user = get_user_dict(DB_FILE)  # 更新中に登録解除されたユーザーを除く
-    if not user:
-      return
-
     # 先週分のデータを取得 (先週月曜0:00 〜 今週月曜0:00)。
     # 終わりを今日の0:00で区切り、0:00〜0:15のACが2週に二重計上されないようにする
     week_end_unix = int(datetime.datetime(now.year, now.month, now.day, tzinfo=JST).timestamp())
+    prepared = get_weekly_prepared(DB_FILE) == today_str
+
+    if not prepared:
+      # 日曜深夜の提出が同期されていない可能性があるので、集計前に全員分を更新する
+      # (投稿は自動タスクなので、人数に比例して時間がかかっても応答期限の問題はない)
+      # レートは終了から遅れて確定するため、コンテスト履歴はキャッシュを使わず取り直す
+      # (取り直さないと、日曜深夜に確定したレート変化がどの週にも入らない)
+      await refresh_users_data(list(user), DB_FILE, force_contest=True)
+      user = get_user_dict(DB_FILE)  # 更新中に登録解除されたユーザーを除く
+      if not user:
+        return
+
     # 期間は「今日を含めて N 日分」なので、今日の0:00で切って先週の7日分にするには 8 を渡す
     ranking_data = await make_growth_ranking(user, 8, DB_FILE, end_unix=week_end_unix)
     if not ranking_data:
       print("[weekly_ranking_post] No ranking data, skipping")
       return
 
-    # 週次サイクルを進める (同じ日に二重に進めないよう、進めた直後に記録する)
-    cycle_id, week_number = advance_weekly_cycle(DB_FILE)
-    set_weekly_last_posted(today_str, DB_FILE)
-    print(f"[weekly_ranking_post] cycle={cycle_id}, week={week_number}")
-
-    # スナップショットを保存
-    snapshot_data = [
-      {
-        "atcoder_name": d["atcoder_name"],
-        "ac_count": d["ac"],
-        "ac_point": d["point"],
-        "rate_change": d["rate_change"],
-      }
-      for d in ranking_data
-    ]
-    save_weekly_snapshot(cycle_id, week_number, snapshot_data, DB_FILE)
+    if prepared:
+      # 前回は集計まで済んで送信に失敗した。週は進めずに送信だけやり直す
+      cycle_id, week_number = get_weekly_cycle_state(DB_FILE)
+      print(f"[weekly_ranking_post] Retrying send for cycle={cycle_id}, week={week_number}")
+    else:
+      # 週次サイクルを進めてスナップショットを保存する。同じ日に二重に進めないよう、すぐ記録する
+      cycle_id, week_number = advance_weekly_cycle(DB_FILE)
+      set_weekly_prepared(today_str, DB_FILE)
+      print(f"[weekly_ranking_post] cycle={cycle_id}, week={week_number}")
+      snapshot_data = [
+        {
+          "atcoder_name": d["atcoder_name"],
+          "ac_count": d["ac"],
+          "ac_point": d["point"],
+          "rate_change": d["rate_change"],
+        }
+        for d in ranking_data
+      ]
+      save_weekly_snapshot(cycle_id, week_number, snapshot_data, DB_FILE)
 
     # テキスト embed (今週の結果)。上位10人だけ載せ、全員の順位はテキストファイルで添付する
     weekly_title = f"🏆 Diligence & Growth [{week_number}週目]"
@@ -553,6 +590,8 @@ async def _post_weekly_ranking():
         return channel.send(embed=embed_point, file=discord.File(graph_point, filename="weekly_point.png"))
       await send_with_retry(make_point_post)
 
+    # 送信がすべて成功してから「投稿済み」にする (失敗したら月曜のうちは1時間ごとに送り直す)
+    set_weekly_last_posted(today_str, DB_FILE)
     print(f"[weekly_ranking_post] Posted week {week_number} of cycle {cycle_id}")
 
   except Exception as e:
@@ -597,6 +636,15 @@ _abc_post_failures = {}  # contest_number -> 送信失敗回数
 
 @tasks.loop(hours=1)
 async def auto_abc_ranking():
+  # 月曜の週次投稿が失敗・取りこぼしていたら、1時間ごとにやり直す
+  try:
+    await catch_up_weekly_ranking_post()
+  except Exception as e:
+    alerts.record_error("catch_up_weekly_ranking_post", e)
+  await _auto_abc_ranking()
+
+
+async def _auto_abc_ranking():
   now_str = datetime.datetime.now(JST).strftime('%H:%M:%S.%f')[:-3]
   print(f"[{now_str}][auto_abc_ranking] tick")
 
@@ -636,17 +684,11 @@ async def auto_abc_ranking():
     abc_title = f"🏆 ABC{next_number:03d} 登録ユーザーランキング"
     abc_fields = abc_ranking_fields(rated, unrated)
     embeds = build_embeds(
-      abc_title, 0xFFD700, datetime.datetime.now(JST), top_fields(abc_fields),
+      abc_title, 0xFFD700, datetime.datetime.now(JST), abc_auto_fields(rated, unrated),
       description="コンテスト結果が確定しました！"
     )
     try:
-      await send_embeds_to_channel(channel, embeds)
-      if len(abc_fields) > PAGE_SIZE:
-        try:
-          await channel.send(content="📄 全員の順位", file=ranking_text_file(abc_title, abc_fields, f"{contest_id}.txt"))
-        except Exception as e:
-          # ランキング本体は送れているので、添付だけの失敗では再投稿しない
-          print(f"[auto_abc_ranking] Failed to send full ranking file: {e}")
+      await channel.send(embed=embeds[0])
     except Exception as e:
       # 送信に失敗したら次のtickで再試行する。ただし失敗し続けると以降のABCが全て止まるので、
       # ABC_POST_MAX_FAILURES 回失敗したら諦めて次のコンテストへ進める
@@ -660,9 +702,17 @@ async def auto_abc_ranking():
         set_prev_contest(next_number, DB_FILE)
         print(f"[auto_abc_ranking] Gave up posting {contest_id}")
       return
-    # 投稿に成功してから prev_contest を進める (送信失敗時に投稿が失われないように)
+    # 1通目が送れたら投稿済みとして prev_contest を進める
+    # (2通目以降や添付の失敗で次の tick に全体を送り直すと、1通目が二重に投稿されるため)
     set_prev_contest(next_number, DB_FILE)
     print(f"[auto_abc_ranking] Posted {contest_id} ranking")
+    try:
+      for extra in embeds[1:]:
+        await channel.send(embed=extra)
+      if len(rated) + len(unrated) > PAGE_SIZE:
+        await channel.send(content="📄 全員の順位", file=ranking_text_file(abc_title, abc_fields, f"{contest_id}.txt"))
+    except Exception as e:
+      alerts.record_error("auto_abc_ranking (続き・添付)", e)
     # レートが確定したので、参加者のコンテスト履歴を次の同期で優先して取り直す (/diligence_growth に反映するため)
     request_contest_resync([d["atcoder_name"] for d in rated + unrated], DB_FILE)
 
@@ -761,21 +811,21 @@ async def bulk_register(interaction: discord.Interaction, group: app_commands.Ch
   user_dict = BULK_GROUPS[group.value]
   async with _registration_lock:
     total = len(user_dict)
-    await interaction.followup.send(f"ユーザー登録を開始します（{total}人）...")
+    await progress_message(interaction, f"ユーザー登録を開始します（{total}人）...")
     done = 0
     for atcoder_name, discord_name in user_dict.items():
       try:
         if get_registered_user(atcoder_name, DB_FILE):
-          await interaction.followup.send(f"⏭️ {atcoder_name}({discord_name}) は既に登録済みです")
+          await progress_message(interaction, f"⏭️ {atcoder_name}({discord_name}) は既に登録済みです")
           continue
         register_user(atcoder_name, discord_name, interaction.user.id, interaction.user.id, DB_FILE)
         await initial_fetch_user_data(atcoder_name, DB_FILE)
         done += 1
-        await interaction.followup.send(f"✅ {atcoder_name}({discord_name}) を登録しました ({done}/{total})")
+        await progress_message(interaction, f"✅ {atcoder_name}({discord_name}) を登録しました ({done}/{total})")
       except Exception as e:
         alerts.record_error("/bulk_register", e)
-        await interaction.followup.send(f"⚠️ {atcoder_name} の登録に失敗: {type(e).__name__}")
-    await interaction.followup.send("✅ ユーザー登録がすべて完了しました！")
+        await progress_message(interaction, f"⚠️ {atcoder_name} の登録に失敗: {type(e).__name__}")
+    await progress_message(interaction, "✅ ユーザー登録がすべて完了しました！")
 
 
 ## @brief ユーザーの精進記録をEmbedで返すコマンド
@@ -845,10 +895,11 @@ async def complete_registration(interaction, atcoder_name, discord_name):
   register_user(atcoder_name, discord_name, interaction.user.id, interaction.user.id, DB_FILE)
   await interaction.followup.send(
     f"{discord_name} さんを {atcoder_name} で登録しました\n"
-    f"提出履歴を取得中です...（提出数が多い場合は数分かかります）"
+    f"提出履歴を取得中です...（提出数が多い場合は数分かかります）",
+    allowed_mentions=discord.AllowedMentions.none(),  # 表示名に <@id> を入れて他人に通知を飛ばせないように
   )
   await initial_fetch_user_data(atcoder_name, DB_FILE)
-  await interaction.followup.send(f"✅ {atcoder_name} のデータ取得が完了しました")
+  await progress_message(interaction, f"✅ {atcoder_name} のデータ取得が完了しました")
 
 
 ## @brief ユーザーをDBに登録するコマンド

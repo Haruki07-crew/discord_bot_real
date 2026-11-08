@@ -16,7 +16,8 @@ async def root():
 
 
 @app.get("/health")
-async def health():
+def health():
+  # async にしない: bot_health は SQLite を同期的に読むので、FastAPI のスレッドプールで実行させる
   """Bot が Discord に接続していて、データの同期が止まっていなければ 200、そうでなければ 503。
   Docker の healthcheck (compose.yaml) から使う。"""
   if health_provider is None:

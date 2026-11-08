@@ -310,6 +310,24 @@ class TestWeekly(Base):
     self.assertEqual(len(weekly[0].fields), 11)  # 上位10人 + 「ほか N 人」
     self.assertIn("📄 全員の順位", [c for _, e, c in self.rec.sent if e is None])
 
+  def test_failed_send_is_retried_without_advancing_week(self):
+    original = self.ns["send_with_retry"]
+
+    async def fast_retry(make_coro, attempts=3, delay=60):
+      return await original(make_coro, attempts=attempts, delay=0)
+    self.ns["send_with_retry"] = fast_retry
+    channel = FakeChannel(self.rec, fail_times=3)  # 1回目の投稿は3回とも失敗する
+    self.ns["client"].get_channel = lambda _id: channel
+    freeze_now(self.ns, self.monday + _dt.timedelta(minutes=15))
+    self.run_async(self.ns["weekly_ranking_post"].coro())
+    self.assertIsNone(self.ns["get_weekly_last_posted"](self.db))  # 投稿済みにならない
+    self.assertEqual(self.ns["get_weekly_cycle_state"](self.db), (1, 1))
+    freeze_now(self.ns, self.monday + _dt.timedelta(hours=1, minutes=15))
+    self.run_async(self.ns["catch_up_weekly_ranking_post"]())  # 1時間後のやり直し
+    self.assertEqual(self.ns["get_weekly_cycle_state"](self.db), (1, 1))  # 週は進まない
+    self.assertIsNotNone(self.ns["get_weekly_last_posted"](self.db))
+    self.assertEqual(len([t for t in self.rec.titles() if t and "Diligence" in t]), 1)
+
   def test_catch_up_only_after_schedule(self):
     freeze_now(self.ns, self.monday + _dt.timedelta(minutes=10))
     self.run_async(self.ns["catch_up_weekly_ranking_post"]())
@@ -365,13 +383,16 @@ class TestBackgroundSync(Base):
     import sys
     self.bs = sys.modules["atcoder.background_sync"]
     self.bs._pause_until.update({"submission": 0.0, "contest": 0.0})
+    self.bs._user_backoff.clear()
+    self.bs.fail_streak.update({"submission": 0, "contest": 0})
+    self.fail_names = set()
     self.calls = []
     self.fail = set()
     db = self.db
 
     async def fake_subs(name, db_file):
       self.calls.append(("submission", name))
-      if "submission" not in self.fail:
+      if "submission" not in self.fail and name not in self.fail_names:
         with dbconn(db_file) as c:
           c.execute("INSERT OR IGNORE INTO update_bookmark (atcoder_name) VALUES (?)", (name,))
           c.execute("UPDATE update_bookmark SET submission_last_fetch = ? WHERE atcoder_name = ?", (time.time(), name))
@@ -410,12 +431,32 @@ class TestBackgroundSync(Base):
     picked = self.run_async(self.bs.sync_step(self.db))
     self.assertEqual(picked["contest"], "u1")
 
-  def test_failure_pauses_that_kind(self):
+  def test_one_failing_user_does_not_block_others(self):
+    self.fail_names.add("u3")
+    order = [self.run_async(self.bs.sync_step(self.db))["submission"] for _ in range(4)]
+    self.assertEqual(order, ["u3", "u2", "u1", None])  # u3 は待機中なので飛ばされ、ほかの人は同期される
+    self.assertEqual(self.bs.fail_streak["submission"], 0)
+
+  def test_failures_across_users_pause_that_kind(self):
     self.fail.add("submission")
-    self.run_async(self.bs.sync_step(self.db))
+    for _ in range(3):
+      self.run_async(self.bs.sync_step(self.db))  # u3, u2, u1 が続けて失敗
     picked = self.run_async(self.bs.sync_step(self.db))
-    self.assertIsNone(picked["submission"])  # 失敗したので一時停止中
-    self.assertEqual([c for c in self.calls if c[0] == "submission"], [("submission", "u3")])
+    self.assertIsNone(picked["submission"])  # API 障害とみなして一時停止中
+    self.assertEqual(self.bs.fail_streak["submission"], 3)
+
+  def test_unregistered_during_sync_leaves_no_rows(self):
+    async def subs_then_unregister(name, db_file):
+      with dbconn(db_file) as c:
+        c.execute("DELETE FROM users WHERE atcoder_name = ?", (name,))
+        c.execute("INSERT OR REPLACE INTO update_bookmark (atcoder_name, submission_last_fetch) VALUES (?, ?)", (name, time.time()))
+        c.execute("INSERT INTO ac_submissions_cache VALUES (?, 1, 'abc1_a', 1, 100)", (name,))
+    self.bs.fetch_and_cache_ac_submissions = subs_then_unregister
+    self.run_async(self.bs.sync_step(self.db))
+    with dbconn(self.db) as c:
+      self.assertEqual(c.execute("SELECT COUNT(*) FROM ac_submissions_cache WHERE atcoder_name='u3'").fetchone()[0], 0)
+      self.assertEqual(c.execute("SELECT COUNT(*) FROM update_bookmark WHERE atcoder_name='u3'").fetchone()[0], 0)
+    self.assertEqual(self.bs.fail_streak["submission"], 0)
 
   def test_footer_reports_age(self):
     self.assertIn("同期中", self.ns["sync_footer"]())  # u3 は未同期
@@ -481,6 +522,18 @@ class TestPaging(Base):
     text = f.fp.read().decode("utf-8")
     self.assertIn("15位 : u14", text)
     self.assertNotIn("**", text)
+
+  def test_abc_auto_fields_count_people(self):
+    def rec(i):
+      return {"atcoder_name": f"u{i}", "discord_name": "d", "rank": i, "performance": 1000, "old_rating": 1000, "new_rating": 1000, "rate_change": 0, "ac_count": 3}
+    rated = [rec(i) for i in range(12)]
+    unrated = [rec(100 + i) for i in range(40)]
+    fields = self.ns["abc_auto_fields"](rated, unrated)
+    self.assertEqual(len(fields), 11)
+    self.assertIn("ほか 42 人", fields[-1][0])
+    self.assertIn("unrated 参加の 40 人", fields[-1][1])
+    few = self.ns["abc_auto_fields"](rated[:3], unrated[:2])
+    self.assertTrue(any("Unrated" in name for name, _ in few))
 
   def test_my_rank(self):
     add_user(self.db, "me_user", uid=42)
@@ -564,10 +617,10 @@ class TestMonitoring(Base):
   def test_health_endpoint(self):
     import server
     server.health_provider = lambda: (False, {"discord_connected": False})
-    resp = self.run_async(server.health())
+    resp = server.health()
     self.assertEqual(resp.status_code, 503)
     server.health_provider = lambda: (True, {"discord_connected": True})
-    self.assertEqual(self.run_async(server.health()).status_code, 200)
+    self.assertEqual(server.health().status_code, 200)
     server.health_provider = None
 
 

@@ -20,8 +20,13 @@ SUBMISSION_SYNC_SEC = 5 * 60        # 提出はこの間隔ごとに取り直す
 CONTEST_SYNC_SEC = 24 * 60 * 60     # コンテスト履歴はこの間隔ごと (コンテスト後は優先して取り直す)
 FAILURE_PAUSE_SEC = 60              # 取得に失敗したら、その種類の同期をしばらく止める (落ちているAPIを叩き続けない)
 
+USER_BACKOFF_BASE_SEC = 5 * 60       # 失敗したユーザーは 5分 → 10分 → 20分 … と間隔を空けて再挑戦する
+USER_BACKOFF_MAX_SEC = 6 * 60 * 60
+GLOBAL_PAUSE_STREAK = 3              # 別々のユーザーで続けてこの回数失敗したら API の障害とみなして全体を止める
+
 _pause_until = {"submission": 0.0, "contest": 0.0}
-# 監視用: 連続で失敗した回数と、最後に成功した時刻 (Unix秒)
+_user_backoff = {}  # (kind, atcoder_name) -> (次に試してよい時刻, 連続失敗回数)
+# 監視用: (ユーザーを問わず) 連続で失敗した回数と、最後に成功した時刻 (Unix秒)
 fail_streak = {"submission": 0, "contest": 0}
 last_success = {"submission": None, "contest": None}
 
@@ -31,21 +36,36 @@ _KINDS = {
 }
 
 
-def _most_stale_user(conn, column, older_than):
+def _most_stale_user(conn, kind, column, older_than, now):
+  """同期が必要なユーザーのうち一番古い人。失敗して待機中のユーザーは飛ばす
+  (飛ばさないと、失敗し続ける1人が毎回選ばれて、ほかの全員の同期が止まる)。"""
   # column は _KINDS の固定値のみ (ユーザー入力は入らない)
-  row = conn.execute(f"""
+  rows = conn.execute(f"""
     SELECT u.atcoder_name FROM users u
     LEFT JOIN update_bookmark b ON b.atcoder_name = u.atcoder_name
     WHERE COALESCE(b.{column}, 0) < ?
     ORDER BY COALESCE(b.{column}, 0) ASC, u.atcoder_name ASC
-    LIMIT 1
-  """, (older_than,)).fetchone()
-  return row[0] if row else None
+  """, (older_than,))
+  for (name,) in rows:
+    retry_at, _count = _user_backoff.get((kind, name), (0.0, 0))
+    if now >= retry_at:
+      return name
+  return None
 
 
 def _fetched_at(conn, column, atcoder_name):
   row = conn.execute(f"SELECT {column} FROM update_bookmark WHERE atcoder_name = ?", (atcoder_name,)).fetchone()
   return (row[0] or 0) if row else 0
+
+
+def _is_registered(conn, atcoder_name):
+  return conn.execute("SELECT 1 FROM users WHERE atcoder_name = ?", (atcoder_name,)).fetchone() is not None
+
+
+def _remove_orphan(conn, atcoder_name):
+  """同期中に登録解除されたユーザーの、書き戻されたキャッシュを消す。"""
+  for table in ("ac_submissions_cache", "contest_history", "update_bookmark"):
+    conn.execute(f"DELETE FROM {table} WHERE atcoder_name = ?", (atcoder_name,))
 
 
 async def sync_step(db_file, now=None):
@@ -54,7 +74,7 @@ async def sync_step(db_file, now=None):
   picked = {}
   with db.connect(db_file) as conn:
     for kind, (column, interval) in _KINDS.items():
-      picked[kind] = None if now < _pause_until[kind] else _most_stale_user(conn, column, now - interval)
+      picked[kind] = None if now < _pause_until[kind] else _most_stale_user(conn, kind, column, now - interval, now)
 
   jobs = []
   if picked["submission"]:
@@ -68,20 +88,35 @@ async def sync_step(db_file, now=None):
     if isinstance(r, Exception):
       print(f"[background_sync] {type(r).__name__}: {r}")
 
-  # 取得時刻が更新されていなければ失敗とみなして、その種類をしばらく止める
+  # 取得時刻が更新されていなければ失敗とみなす
   with db.connect(db_file) as conn:
     for kind, (column, _interval) in _KINDS.items():
       name = picked[kind]
       if not name:
         continue
+      if not _is_registered(conn, name):
+        _remove_orphan(conn, name)  # 失敗扱いにはしない
+        _user_backoff.pop((kind, name), None)
+        continue
       if _fetched_at(conn, column, name) < now:
-        _pause_until[kind] = now + FAILURE_PAUSE_SEC
-        fail_streak[kind] += 1
-        print(f"[background_sync] {kind} sync failed for {name}, pausing {FAILURE_PAUSE_SEC}s")
+        _record_failure(kind, name, now)
       else:
+        _user_backoff.pop((kind, name), None)
         fail_streak[kind] = 0
         last_success[kind] = time.time()
   return picked
+
+
+def _record_failure(kind, name, now):
+  _retry_at, count = _user_backoff.get((kind, name), (0.0, 0))
+  count += 1
+  wait = min(USER_BACKOFF_BASE_SEC * 2 ** (count - 1), USER_BACKOFF_MAX_SEC)
+  _user_backoff[(kind, name)] = (now + wait, count)
+  fail_streak[kind] += 1
+  print(f"[background_sync] {kind} sync failed for {name} ({count}回目), retry in {wait}s")
+  if fail_streak[kind] >= GLOBAL_PAUSE_STREAK:
+    # 別々のユーザーで続けて失敗している = API 側の障害の可能性が高いので、全体を少し止める
+    _pause_until[kind] = now + FAILURE_PAUSE_SEC
 
 
 def request_contest_resync(atcoder_names, db_file):

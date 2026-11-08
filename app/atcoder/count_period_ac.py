@@ -61,10 +61,8 @@ async def count_period_ac(atcoder_name, day, db_file="database.db", end_unix=Non
   from_second = period_start_unix
   for page in range(300):
     url = f"https://kenkoooo.com/atcoder/atcoder-api/v3/user/submissions?user={atcoder_name}&from_second={from_second}"
-    try:
-      data = await http_client.get_json(url, log=f"期間AC数取得 [{atcoder_name}] page={page}")
-    except Exception:
-      break
+    # 途中で失敗したら例外にする (途中までの数を正しい値として表示しないように)
+    data = await http_client.get_json(url, log=f"期間AC数取得 [{atcoder_name}] page={page}")
     if not isinstance(data, list) or not data:
       break
     for submission in data:
