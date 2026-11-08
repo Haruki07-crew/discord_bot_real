@@ -413,7 +413,12 @@ auto_abc_ranking
 
 ヘルスチェック用HTTPサーバー (server.py) は client.run の前にデーモンスレッドで起動する。
 
-## 動作確認
+## テスト
 
-Discord に接続せずに確認するには、main.py を `server_thread()` と `client.run()` を除いて読み込む。
-そのうえで、コマンドの `callback` やタスクの `coro` に偽の Interaction / Channel を渡して実行する。
+```bash
+python -m unittest discover -s tests -v
+```
+
+- `tests/support.py` が main.py を Discord に接続せずに読み込む (`server_thread()` と `client.run()` を除いて exec)。
+- コマンドは `ns["コマンド名"].callback(FakeInteraction, ...)`、タスクは `ns["タスク名"].coro()` で実行する。
+- `tests/test_offline.py` はネットワークに出ない。GitHub Actions (.github/workflows/test.yml) で PR ごとに実行される。
