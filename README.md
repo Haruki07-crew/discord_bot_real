@@ -244,4 +244,6 @@ docker compose logs -f     # "activate the bot  now!!!!" が出れば成功
 
 ## 開発者向け
 
-ファイル構成、データベースの設計、内部の処理の流れは [docs/development.md](docs/development.md) にまとめています。
+- ファイル構成、データベースの設計、内部の処理の流れ: [docs/development.md](docs/development.md)
+- テスト用の Bot で、本物の Discord 上の動きを確かめる方法: [docs/testing-on-discord.md](docs/testing-on-discord.md)
+- 外部 API の仕様メモ: [docs/atcoder-api.md](docs/atcoder-api.md)
