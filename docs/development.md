@@ -405,7 +405,7 @@ auto_abc_ranking
 
 起動時の処理 (on_ready):
 1. DBの全テーブルを初期化 (init_db)
-2. バックグラウンドタスクを開始 (daily_update, weekly_ranking_post, auto_abc_ranking)
+2. バックグラウンドタスクを開始 (background_sync, daily_update, weekly_ranking_post, auto_abc_ranking)
 3. スラッシュコマンドをDiscordに同期 (tree.sync)。起動後1回だけ行い、失敗しても続行する
 4. ログ出力用チャンネルを設定
 5. prev_contestが未設定の場合、APIから直近のABC番号を取得して初期化 (失敗時は auto_abc_ranking で再試行)
