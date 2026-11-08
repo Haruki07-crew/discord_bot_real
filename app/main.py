@@ -247,6 +247,16 @@ def graph_targets(interaction, ranking):
   return names
 
 
+_graph_lock = asyncio.Lock()
+
+
+## @brief グラフを別スレッドで描く (描画中もイベントループを止めず、他のコマンドや同期が動き続けるように)
+## @details matplotlib の pyplot は同時に複数スレッドから使えないので、ロックで1つずつ描く
+async def render_graph(func, *args, **kwargs):
+  async with _graph_lock:
+    return await asyncio.to_thread(func, *args, **kwargs)
+
+
 ## @brief 送信処理を最大 attempts 回まで再試行する (一時的なDiscord障害で自動投稿が失われないように)
 ## @param make_coro 呼ぶたびに新しい送信コルーチンを返す関数 (discord.File は1度しか送れないので毎回作り直す)
 async def send_with_retry(make_coro, attempts=3, delay=60):
@@ -513,9 +523,9 @@ async def _post_weekly_ranking():
     snapshots = {n: snapshots[n] for n in top_names}
 
     # AC数版グラフ
-    graph_ac = create_weekly_graph(snapshots, week_number, x_axis="ac")
+    graph_ac = await render_graph(create_weekly_graph, snapshots, week_number, x_axis="ac")
     # 点数版グラフ
-    graph_point = create_weekly_graph(snapshots, week_number, x_axis="point")
+    graph_point = await render_graph(create_weekly_graph, snapshots, week_number, x_axis="point")
 
     def make_ac_post():
       file_ac = None
@@ -996,12 +1006,12 @@ async def diligence_growth(interaction: discord.Interaction, period: app_command
     targets = graph_targets(interaction, ranking_data)
     if day <= 7:
       ac_rate_data = {d["atcoder_name"]: d for d in ranking_data if d["atcoder_name"] in targets}
-      graph_buf = create_ac_rate_graph(ac_rate_data, label)
+      graph_buf = await render_graph(create_ac_rate_graph, ac_rate_data, label)
     else:
       all_user_data = {}
       for atcoder_name in targets:
         all_user_data[atcoder_name] = await get_progress_data(atcoder_name, day, DB_FILE)
-      graph_buf = create_progress_graph(all_user_data)
+      graph_buf = await render_graph(create_progress_graph, all_user_data)
 
     file = discord.File(graph_buf, filename="ac_rate.png") if graph_buf is not None else None
     await send_pages_to_interaction(interaction, pages, file, "ac_rate.png")
@@ -1063,12 +1073,12 @@ async def diligence_growth_point(interaction: discord.Interaction, period: app_c
     if day <= 7:
       # 散布図 (横軸: 点数, 縦軸: レート変化)
       point_rate_data = {d["atcoder_name"]: {"ac": d["point"], "rate_change": d["rate_change"]} for d in sorted_data if d["atcoder_name"] in targets}
-      graph_buf = create_ac_rate_graph(point_rate_data, label, x_label="点数")
+      graph_buf = await render_graph(create_ac_rate_graph, point_rate_data, label, x_label="点数")
     else:
       all_user_data = {}
       for atcoder_name in targets:
         all_user_data[atcoder_name] = await get_progress_data(atcoder_name, day, DB_FILE, x_axis="point")
-      graph_buf = create_progress_graph(all_user_data, x_label="点数")
+      graph_buf = await render_graph(create_progress_graph, all_user_data, x_label="点数")
 
     file = discord.File(graph_buf, filename="point_rate.png") if graph_buf is not None else None
     await send_pages_to_interaction(interaction, pages, file, "point_rate.png")
