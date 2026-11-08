@@ -27,18 +27,15 @@ app/
     get_user_dict.py       全ユーザーの {atcoder_name: discord_name} 辞書を返す
     get_registered_user.py 指定ユーザーの登録情報を返す (二重登録チェック用)
     get_register_id.py     登録者IDを返す (解除権限チェック用)
-    get_all_users_with_discord_id.py  全ユーザーの (atcoder_name, discord_name, discord_id) を返す
 
     --- データ取得・キャッシュ ---
+    http_client.py                     外部APIへのリクエストを集約。同じホストへは Bot 全体で1秒に1回まで
     initial_fetch_user_data.py        コンテスト履歴 + AC提出を一括取得 / refresh_users_data (集計前の差分更新)
     atcoder_user_exists.py            ユーザーページの404でAtCoderユーザーの存在を確認
     fetch_and_cache_contest_history.py コンテスト履歴をAtCoder APIから取得しDBにキャッシュ
     fetch_and_cache_ac_submissions.py  AC提出をkenkoooo APIから取得しDBにキャッシュ
     get_ac_count.py                    総AC数を返す (DBキャッシュ優先、なければAPI)
     count_period_ac.py                 指定期間のAC数と合計点数を返す [ac_count, point_sum]
-    count_period_ac2.py                count_period_acの拡張版 (難易度合計も返す)
-    get_latest_rating.py               AtCoder APIから現在のレートを文字列で返す
-    get_latest_rating_nofstring.py     AtCoder APIから現在のレートを数値で返す
     get_latest_rating_from_db.py       DBキャッシュから最新レートを返す
     get_rate_heart.py                  レート値に応じたハート絵文字を返す
     parse_atcoder_time.py              AtCoderの日時文字列をdatetimeに変換
@@ -60,19 +57,14 @@ app/
     fetch_abc_standings_if_ready.py  ABC結果がレート確定済みか判定し、確定時のみ結果を返す
     build_abc_standings.py           results/jsonから登録ユーザーを抽出 (上2つの共通処理。参加者の提出キャッシュを更新してからAC数を数える)
     get_contest_ac_count.py          コンテスト中のAC数をac_submissions_cacheからカウント
-    get_contest_end_time.py          contest_historyからコンテスト終了時刻を取得
     get_prev_contest.py              最後に処理したABCコンテスト番号を取得
     set_prev_contest.py              最後に処理したABCコンテスト番号を保存
     get_latest_ended_abc_number.py   直近の終了済みABC番号をAPIから取得
-    is_contest_auto_posted.py        自動投稿済みかどうかを判定
-    mark_contest_auto_posted.py      自動投稿済みとしてマーク
 
     --- 週次サイクル ---
     weekly_cycle_helpers.py   12週サイクルの管理、スナップショットの保存・取得
 
     --- その他 ---
-    fetch_problem.py   kenkoooo の problem-models.json を取得しキャッシュ
-    get_diff.py        問題の生difficulty値を加工して返す
 ```
 
 ---
@@ -302,7 +294,7 @@ Bot全体のキーバリューストア。現在は `prev_contest` の管理に�
 | エンドポイント | 用途 | 呼び出し元 |
 |---|---|---|
 | `atcoder.jp/users/{user}` | ユーザー存在確認 (存在しなければ404) | atcoder_user_exists |
-| `atcoder.jp/users/{user}/history/json` | コンテスト履歴・レート取得 (存在しないユーザーでも 200 [] を返すため存在確認には使えない) | fetch_and_cache_contest_history, get_latest_rating, get_latest_rating_nofstring |
+| `atcoder.jp/users/{user}/history/json` | コンテスト履歴・レート取得 (存在しないユーザーでも 200 [] を返すため存在確認には使えない) | fetch_and_cache_contest_history |
 | `atcoder.jp/contests/{id}/results/json` | コンテスト結果 (順位・パフォーマンス) | get_abc_standings, fetch_abc_standings_if_ready |
 
 注意事項:
@@ -313,19 +305,19 @@ Bot全体のキーバリューストア。現在は `prev_contest` の管理に�
 
 | エンドポイント | 用途 | 呼び出し元 |
 |---|---|---|
-| `kenkoooo.com/atcoder/atcoder-api/v3/user/submissions` | ユーザーのAC提出一覧 | fetch_and_cache_ac_submissions, count_period_ac, count_period_ac2 |
+| `kenkoooo.com/atcoder/atcoder-api/v3/user/submissions` | ユーザーのAC提出一覧 | fetch_and_cache_ac_submissions, count_period_ac |
 | `kenkoooo.com/atcoder/atcoder-api/v3/user/ac_rank` | 総AC数 | get_ac_count |
 | `kenkoooo.com/atcoder/resources/contests.json` | コンテスト一覧 | get_latest_ended_abc_number |
-| `kenkoooo.com/atcoder/resources/problem-models.json` | 問題の難易度モデル | fetch_problem |
 
 注意事項:
-- ページネーション: 1回最大500件。`from_id` は無視されるため `from_second` を進めてページ送りする。ページ間に0.8秒のインターバル
+- ページネーション: 1回最大500件。`from_id` は無視されるため `from_second` を進めてページ送りする。間隔は http_client が1秒空ける
 - 差分取得は最終提出時刻の24時間前から取り直す (kenkoooo が提出を遅れて取り込むことがあるため。重複は INSERT OR IGNORE で除外)
 - AHC (AtCoder Heuristic Contest) の問題はproblem_idに "ahc" を含むため除外している
 - レスポンスは `content_type=None` で解析 (サーバーのContent-Typeが不安定なため)
 
 ### 共通のAPIハンドリング
 
+- 全API呼び出しは `atcoder/http_client.py` を通す。同じホストへのリクエストは Bot 全体で1秒に1回までに制限される
 - 全API呼び出しに30秒のタイムアウトを設定 (connect: 10秒, read: 20秒)
 - API呼び出しはdiscord_loggerで記録され、5秒ごとにまとめて指定チャンネルに送信される (本来の処理は送信を待たない)
 - DBキャッシュの有効期間: コンテスト履歴は600秒 (10分、週次集計の直前は必ず取り直す)、AC提出は60秒

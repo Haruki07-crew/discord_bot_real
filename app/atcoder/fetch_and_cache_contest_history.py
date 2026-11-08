@@ -1,8 +1,7 @@
-import aiohttp
 import sqlite3
 import time
 from datetime import datetime, timezone, timedelta
-import discord_logger
+from atcoder import http_client
 
 JST = timezone(timedelta(hours=9))
 # レートはコンテスト終了から少し遅れて確定する。長くキャッシュすると確定直後の集計に反映されないので短めにする
@@ -34,12 +33,7 @@ async def fetch_and_cache_contest_history(atcoder_name, db_file, force=False):
 
   try:
     url = f"https://atcoder.jp/users/{atcoder_name}/history/json"
-    await discord_logger.log_api(f"APIを叩いた: コンテスト履歴取得 (fetch_and_cache_contest_history) [{atcoder_name}]")
-    timeout = aiohttp.ClientTimeout(total=30, connect=10, sock_read=20)
-    async with aiohttp.ClientSession() as session:
-      async with session.get(url, timeout=timeout) as resp:
-        resp.raise_for_status()
-        data = await resp.json(content_type=None)
+    data = await http_client.get_json(url, log=f"コンテスト履歴取得 [{atcoder_name}]")
   except Exception as e:
     with sqlite3.connect(db_file) as conn:
       cursor = conn.cursor()

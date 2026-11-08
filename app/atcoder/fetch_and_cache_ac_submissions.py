@@ -1,9 +1,7 @@
-import aiohttp
-import asyncio
 import sqlite3
 import time
 from datetime import datetime, timezone, timedelta
-import discord_logger
+from atcoder import http_client
 
 JST = timezone(timedelta(hours=9))
 
@@ -54,43 +52,34 @@ async def fetch_and_cache_ac_submissions(atcoder_name, db_file):
   last_submission_id = from_id
   last_epoch_second = max(0, from_epoch - REFETCH_MARGIN_SEC) if from_epoch > 0 else 0
   fetch_ok = False
-  timeout = aiohttp.ClientTimeout(total=30, connect=10, sock_read=20)
-  async with aiohttp.ClientSession() as session:
-    page = 0
-    while page < 300:
-      url = (
-        f"https://kenkoooo.com/atcoder/atcoder-api/v3/user/submissions"
-        f"?user={atcoder_name}&from_second={last_epoch_second}"
-      )
+  for page in range(300):
+    url = (
+      f"https://kenkoooo.com/atcoder/atcoder-api/v3/user/submissions"
+      f"?user={atcoder_name}&from_second={last_epoch_second}"
+    )
+    try:
+      data = await http_client.get_json(url, log=f"AC提出取得 [{atcoder_name}] page={page}")
+    except Exception as e:
+      print(f"[fetch_and_cache_ac_submissions] {atcoder_name}: {type(e).__name__}: {e}")
+      break
 
-      await discord_logger.log_api(f"APIを叩いた: AC提出取得 (fetch_and_cache_ac_submissions) [{atcoder_name}] page={page}")
-      try:
-        async with session.get(url, timeout=timeout) as resp:
-          resp.raise_for_status()
-          data = await resp.json(content_type=None)
-      except Exception as e:
-        print(f"[fetch_and_cache_ac_submissions] {atcoder_name}: {type(e).__name__}: {e}")
-        break
+    if not isinstance(data, list):
+      break
+    fetch_ok = True
+    if not data:
+      break
 
-      if not isinstance(data, list):
-        break
-      fetch_ok = True
-      if not data:
-        break
+    for sub in data:
+      if sub["result"] == "AC" and "ahc" not in sub["problem_id"]:
+        new_submissions.append((atcoder_name, sub["id"], sub["problem_id"], sub["epoch_second"], sub.get("point", 0)))
 
-      for sub in data:
-        if sub["result"] == "AC" and "ahc" not in sub["problem_id"]:
-          new_submissions.append((atcoder_name, sub["id"], sub["problem_id"], sub["epoch_second"], sub.get("point", 0)))
-
-      last_submission_id = data[-1]["id"]
-      page += 1
-      if len(data) < 500:
-        last_epoch_second = data[-1]["epoch_second"]
-        break
-      next_epoch = data[-1]["epoch_second"]
-      # 同一秒に500件以上ある場合でも先へ進めるようにする
-      last_epoch_second = next_epoch if next_epoch > last_epoch_second else last_epoch_second + 1
-      await asyncio.sleep(0.8)
+    last_submission_id = data[-1]["id"]
+    if len(data) < 500:
+      last_epoch_second = data[-1]["epoch_second"]
+      break
+    next_epoch = data[-1]["epoch_second"]
+    # 同一秒に500件以上ある場合でも先へ進めるようにする
+    last_epoch_second = next_epoch if next_epoch > last_epoch_second else last_epoch_second + 1
 
   with sqlite3.connect(db_file) as conn:
     cursor = conn.cursor()

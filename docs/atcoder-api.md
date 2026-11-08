@@ -4,10 +4,9 @@
 
 ## 共通ルール
 
-- **同じホストへのリクエストは1秒に1回まで。** ループで叩くときは `await asyncio.sleep(1.0)` 以上を空ける。
-- タイムアウトは `aiohttp.ClientTimeout(total=30, connect=10, sock_read=20)`。
-- レスポンスは `resp.json(content_type=None)` で読む (Content-Type が JSON でないことがある)。
-- 呼び出しは `discord_logger.log_api()` で記録する。
+- **リクエストは必ず `app/atcoder/http_client.py` の `get()` / `get_json()` を通す。** aiohttp を直接使わない。
+  - 同じホストへのリクエストは Bot 全体で1秒に1回までに制限される (コマンドと自動タスクが同時に動いても守られる)。
+  - タイムアウト (30秒)、User-Agent、`content_type=None` での JSON 解析、discord_logger への記録もここで行う。
 
 ## atcoder.jp
 

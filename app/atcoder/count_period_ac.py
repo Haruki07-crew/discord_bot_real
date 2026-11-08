@@ -1,9 +1,7 @@
-import aiohttp
-import asyncio
 import math
 import sqlite3
 from datetime import datetime, timezone, timedelta
-import discord_logger
+from atcoder import http_client
 
 def get_period_start_unix(day):
   """集計期間の開始時刻(Unix秒)を返す。AC数・レート変化・グラフで同じ期間を使うための共通関数。
@@ -47,32 +45,24 @@ async def count_period_ac(atcoder_name, day, db_file="database.db", end_unix=Non
   s = set()
   ac_point_sum = 0
   from_second = period_start_unix
-  page = 0
-  timeout = aiohttp.ClientTimeout(total=30, connect=10, sock_read=20)
-  async with aiohttp.ClientSession() as session:
-    while page < 300:
-      url = f"https://kenkoooo.com/atcoder/atcoder-api/v3/user/submissions?user={atcoder_name}&from_second={from_second}"
-      await discord_logger.log_api(f"APIを叩いた: 期間AC数取得 (count_period_ac) [{atcoder_name}] page={page}")
-      try:
-        async with session.get(url, timeout=timeout) as resp:
-          resp.raise_for_status()
-          data = await resp.json(content_type=None)
-      except Exception as e:
-        break
-      if not isinstance(data, list) or not data:
-        break
-      for submission in data:
-        if submission["epoch_second"] >= period_end_unix:
-          continue
-        if submission["result"] == "AC":
-          problem_id = submission["problem_id"]
-          if "ahc" not in problem_id and problem_id not in s:
-            s.add(problem_id)
-            ac_point_sum += submission.get("point", 0) or 0
-      page += 1
-      if len(data) < 500:
-        break
-      next_from = data[-1]["epoch_second"]
-      from_second = next_from if next_from > from_second else from_second + 1
-      await asyncio.sleep(0.8)
+  for page in range(300):
+    url = f"https://kenkoooo.com/atcoder/atcoder-api/v3/user/submissions?user={atcoder_name}&from_second={from_second}"
+    try:
+      data = await http_client.get_json(url, log=f"期間AC数取得 [{atcoder_name}] page={page}")
+    except Exception:
+      break
+    if not isinstance(data, list) or not data:
+      break
+    for submission in data:
+      if submission["epoch_second"] >= period_end_unix:
+        continue
+      if submission["result"] == "AC":
+        problem_id = submission["problem_id"]
+        if "ahc" not in problem_id and problem_id not in s:
+          s.add(problem_id)
+          ac_point_sum += submission.get("point", 0) or 0
+    if len(data) < 500:
+      break
+    next_from = data[-1]["epoch_second"]
+    from_second = next_from if next_from > from_second else from_second + 1
   return [len(s), math.ceil(ac_point_sum)]

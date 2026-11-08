@@ -184,7 +184,7 @@ def abc_ranking_fields(rated, unrated):
 async def daily_update():
   print("[daily_update] Starting daily data update...")
   users = list(get_user_dict(DB_FILE).keys())
-  await refresh_users_data(users, DB_FILE, interval=1.5)
+  await refresh_users_data(users, DB_FILE)
   print("[daily_update] Daily update complete")
   # 1日1回 DB をバックアップする (14日分を残す)。壊れたり消えたりしても前日の状態に戻せるように
   try:
@@ -619,7 +619,6 @@ async def user_register(interaction: discord.Interaction, atcoder_name: str, dis
       f"{discord_name} さんを {atcoder_name} で登録しました\n"
       f"提出履歴を取得中です...（提出数が多い場合は数分かかります）"
     )
-    await asyncio.sleep(1.0)  # 存在確認のAtCoder APIから1秒空けてから全件取得
     await initial_fetch_user_data(atcoder_name, DB_FILE)
     await interaction.followup.send(f"✅ {atcoder_name} のデータ取得が完了しました")
   except Exception as e:
