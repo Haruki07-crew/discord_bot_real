@@ -1,3 +1,5 @@
+import matplotlib
+matplotlib.use("Agg")  # 画面に表示せず画像だけ作る (別スレッドで描くので GUI 用の方式は使えない)
 import matplotlib.pyplot as plt
 import io
 

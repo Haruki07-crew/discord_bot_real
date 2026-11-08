@@ -571,6 +571,32 @@ class TestMonitoring(Base):
     server.health_provider = None
 
 
+class TestGraphThread(Base):
+  def test_event_loop_keeps_running_while_drawing(self):
+    data = {f"user{i}": [(x, 1000 + x) for x in range(200)] for i in range(10)}
+
+    async def run():
+      ticks = 0
+      done = False
+
+      async def ticker():
+        nonlocal ticks
+        while not done:
+          ticks += 1
+          await asyncio.sleep(0.01)
+      t = asyncio.create_task(ticker())
+      bufs = await asyncio.gather(
+        self.ns["render_graph"](self.ns["create_progress_graph"], data),
+        self.ns["render_graph"](self.ns["create_progress_graph"], data, x_label="点数"),
+      )
+      done = True
+      await t
+      return ticks, bufs
+    ticks, bufs = self.run_async(run())
+    self.assertTrue(all(b is not None and b.getbuffer().nbytes > 0 for b in bufs))
+    self.assertGreater(ticks, 3)  # 描画中もイベントループが回っている
+
+
 class TestLogger(unittest.TestCase):
   def test_chunks_fit_discord_limit(self):
     import discord_logger
