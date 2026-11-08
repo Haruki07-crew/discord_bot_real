@@ -1,3 +1,4 @@
+from atcoder import db
 import sqlite3
 from datetime import datetime, timezone, timedelta
 
@@ -8,7 +9,7 @@ def get_ac_streak(atcoder_name, db_file):
   now = datetime.now(JST)
   yesterday = datetime(now.year, now.month, now.day, tzinfo=JST) - timedelta(days=1)
 
-  with sqlite3.connect(db_file) as conn:
+  with db.connect(db_file) as conn:
     cursor = conn.cursor()
     cursor.execute("""
       SELECT DISTINCT date(epoch_second, 'unixepoch', '+9 hours') as ac_date

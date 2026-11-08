@@ -1,3 +1,4 @@
+from atcoder import db
 import sqlite3
 
 
@@ -8,7 +9,7 @@ def get_contest_ac_count(atcoder_name, contest_number, end_time_unix, db_file):
   contest_id = f"abc{contest_number:03d}"
   start_time_unix = end_time_unix - (100 * 60)  # ABC = 100分
 
-  with sqlite3.connect(db_file) as conn:
+  with db.connect(db_file) as conn:
     cursor = conn.cursor()
     cursor.execute("""
       SELECT COUNT(DISTINCT problem_id) FROM ac_submissions_cache

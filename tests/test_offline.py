@@ -10,6 +10,7 @@ import unittest
 
 import support
 from support import JST, Recorder, FakeChannel, FakeInteraction, load_main, freeze_now, no_refresh
+from atcoder.db import connect as dbconn
 
 
 def today_start():
@@ -18,7 +19,7 @@ def today_start():
 
 
 def add_user(db, name, display="x", uid=1):
-  with sqlite3.connect(db) as c:
+  with dbconn(db) as c:
     c.execute("INSERT INTO users VALUES (?, ?, ?, ?)", (name, display, uid, uid))
     # 提出の取得に成功済みの状態にする (キャッシュが使われる)
     c.execute(
@@ -28,12 +29,12 @@ def add_user(db, name, display="x", uid=1):
 
 
 def add_ac(db, name, sid, problem, epoch, point=100):
-  with sqlite3.connect(db) as c:
+  with dbconn(db) as c:
     c.execute("INSERT INTO ac_submissions_cache VALUES (?, ?, ?, ?, ?)", (name, sid, problem, int(epoch), point))
 
 
 def add_contest(db, name, contest, end_dt, old, new):
-  with sqlite3.connect(db) as c:
+  with dbconn(db) as c:
     c.execute("INSERT INTO contest_history VALUES (?, ?, ?, ?, ?)", (name, contest, end_dt.isoformat(), new, old))
 
 
@@ -144,7 +145,7 @@ class TestUsers(Base):
     add_ac(self.db, "dave", 1, "abc1_a", 1)
     it = FakeInteraction(self.rec, user_id=1)
     self.run_async(self.ns["user_unregister"].callback(it, "DAVE"))
-    with sqlite3.connect(self.db) as c:
+    with dbconn(self.db) as c:
       for table in ("users", "ac_submissions_cache", "update_bookmark"):
         self.assertEqual(c.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0], 0, table)
 
@@ -152,7 +153,7 @@ class TestUsers(Base):
     add_user(self.db, "erin", uid=1)
     it = FakeInteraction(self.rec, user_id=999)
     self.run_async(self.ns["user_unregister"].callback(it, "erin"))
-    with sqlite3.connect(self.db) as c:
+    with dbconn(self.db) as c:
       self.assertEqual(c.execute("SELECT COUNT(*) FROM users").fetchone()[0], 1)
 
 
@@ -166,7 +167,7 @@ class TestRegister(Base):
     self.ns["admin_id"] = "999"
 
   def users(self):
-    with sqlite3.connect(self.db) as c:
+    with dbconn(self.db) as c:
       return c.execute("SELECT atcoder_name, discord_name, discord_id FROM users ORDER BY atcoder_name").fetchall()
 
   def test_member_can_register_only_one_account(self):
@@ -228,7 +229,7 @@ class TestBackup(Base):
     from atcoder.backup_database import backup_database
     add_user(self.db, "gina")
     path = backup_database(self.db, keep=2)
-    with sqlite3.connect(path) as c:
+    with dbconn(path) as c:
       self.assertEqual(c.execute("SELECT atcoder_name FROM users").fetchall(), [("gina",)])
     backup_dir = os.path.dirname(path)
     for d in ("20000101", "20000102", "20000103"):
@@ -275,21 +276,21 @@ class TestBackgroundSync(Base):
     async def fake_subs(name, db_file):
       self.calls.append(("submission", name))
       if "submission" not in self.fail:
-        with sqlite3.connect(db_file) as c:
+        with dbconn(db_file) as c:
           c.execute("INSERT OR IGNORE INTO update_bookmark (atcoder_name) VALUES (?)", (name,))
           c.execute("UPDATE update_bookmark SET submission_last_fetch = ? WHERE atcoder_name = ?", (time.time(), name))
 
     async def fake_contest(name, db_file, force=False):
       self.calls.append(("contest", name))
       if "contest" not in self.fail:
-        with sqlite3.connect(db_file) as c:
+        with dbconn(db_file) as c:
           c.execute("INSERT OR IGNORE INTO update_bookmark (atcoder_name) VALUES (?)", (name,))
           c.execute("UPDATE update_bookmark SET contest_last_fetched = ? WHERE atcoder_name = ?", (time.time(), name))
 
     self._orig = (self.bs.fetch_and_cache_ac_submissions, self.bs.fetch_and_cache_contest_history)
     self.bs.fetch_and_cache_ac_submissions = fake_subs
     self.bs.fetch_and_cache_contest_history = fake_contest
-    with sqlite3.connect(db) as c:
+    with dbconn(db) as c:
       for i, name in enumerate(["u1", "u2", "u3"]):
         c.execute("INSERT INTO users VALUES (?, ?, 1, 1)", (name, name))
       # u2 は提出が一番古い、u3 は一度も同期していない (bookmark なし)

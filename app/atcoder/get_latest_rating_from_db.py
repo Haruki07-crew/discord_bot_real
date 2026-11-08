@@ -1,7 +1,8 @@
+from atcoder import db
 import sqlite3
 
 def get_latest_rating_from_db(atcoder_name, db_file):
-  with sqlite3.connect(db_file) as conn:
+  with db.connect(db_file) as conn:
     cursor = conn.cursor()
     cursor.execute("""
       SELECT new_rating FROM contest_history
