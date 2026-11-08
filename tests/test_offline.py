@@ -146,6 +146,41 @@ class TestUsers(Base):
       self.assertEqual(c.execute("SELECT COUNT(*) FROM users").fetchone()[0], 1)
 
 
+class TestRegister(Base):
+  def setUp(self):
+    super().setUp()
+    async def exists(name):
+      return True
+    self.ns["atcoder_user_exists"] = exists
+    self.ns["initial_fetch_user_data"] = no_refresh
+    self.ns["admin_id"] = "999"
+
+  def users(self):
+    with sqlite3.connect(self.db) as c:
+      return c.execute("SELECT atcoder_name, discord_name, discord_id FROM users ORDER BY atcoder_name").fetchall()
+
+  def test_member_can_register_only_one_account(self):
+    it = FakeInteraction(self.rec, user_id=5)
+    it.user.display_name = "表示名"
+    self.run_async(self.ns["user_register"].callback(it, "first_acc", None))
+    self.run_async(self.ns["user_register"].callback(it, "second_acc", "x"))
+    self.assertEqual(self.users(), [("first_acc", "表示名", 5)])
+    self.assertIn("1人1アカウント", self.rec.titles()[-1])
+
+  def test_admin_can_register_many(self):
+    it = FakeInteraction(self.rec, user_id=999)
+    self.run_async(self.ns["user_register"].callback(it, "acc_one", "A"))
+    self.run_async(self.ns["user_register"].callback(it, "acc_two", "B"))
+    self.assertEqual([u[0] for u in self.users()], ["acc_one", "acc_two"])
+
+  def test_member_can_reregister_after_unregister(self):
+    it = FakeInteraction(self.rec, user_id=5)
+    self.run_async(self.ns["user_register"].callback(it, "first_acc", "A"))
+    self.run_async(self.ns["user_unregister"].callback(it, "first_acc"))
+    self.run_async(self.ns["user_register"].callback(it, "second_acc", "A"))
+    self.assertEqual([u[0] for u in self.users()], ["second_acc"])
+
+
 class TestWeekly(Base):
   def setUp(self):
     super().setUp()
