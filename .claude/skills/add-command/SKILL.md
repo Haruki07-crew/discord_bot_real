@@ -26,8 +26,7 @@ async def command_name(interaction: discord.Interaction, atcoder_name: str):
     pages = build_pages("タイトル", 0x3498db, interaction.created_at, fields)   # 1ページ10人
     await send_pages_to_interaction(interaction, pages)          # 2ページ以上なら ◀ ▶ ボタンが付く
   except Exception as e:
-    print(e)
-    await interaction.edit_original_response(content=f"⚠️ エラーが発生しました。お手数ですが(<@{admin_id}>)までご連絡ください。")
+    await report_command_error(interaction, "command_name", e)   # 記録 + 管理者に DM + 実行者にエラー表示
 ```
 
 ## チェックリスト
@@ -47,7 +46,7 @@ async def command_name(interaction: discord.Interaction, atcoder_name: str):
   - 外部APIを叩くときは、同じホストに1秒に1回まで
   - 登録人数に比例して時間がかかる処理は、15分の応答期限に注意する。人数が増えても終わる設計にする
 - **権限**
-  - 管理者だけに許す操作は `str(interaction.user.id) == str(admin_id)` で確認する
+  - 管理者だけに許す操作は `is_admin(interaction.user.id)` で確認する
 - **ドキュメントとテスト**
   - README.md の「使い方」にコマンドを追記する
   - `tests/test_offline.py` にテストを足す。`support.FakeInteraction` で `command_name.callback(it, ...)` を呼ぶ

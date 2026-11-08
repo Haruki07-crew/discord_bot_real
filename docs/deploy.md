@@ -175,7 +175,7 @@ scp -r <ユーザー名>@atcoder-bot.local:~/discord_bot_real/data/backups ./atc
 
 ```bash
 cd ~/discord_bot_real
-docker compose ps              # 動いているか
+docker compose ps              # 動いているか (STATUS が healthy なら正常)
 docker compose logs -f         # ログを見る
 docker compose restart         # 再起動
 docker compose down            # 止める (データは data/ に残る)

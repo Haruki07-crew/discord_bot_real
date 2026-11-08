@@ -10,6 +10,12 @@ services:
       DB_PATH: /data/database.db     # DB は下の ./data に保存されるので、作り直しても消えない
     volumes:
       - ./data:/data                 # ./data/database.db と ./data/backups/ (毎日のバックアップ)
+    healthcheck:                     # Discord から切断・同期が止まっていると unhealthy になる (docker compose ps で見える)
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health', timeout=5)"]
+      interval: 1m
+      timeout: 10s
+      start_period: 2m
+      retries: 3
     logging:                         # ログが SD カードを埋め尽くさないように上限を設ける
       driver: json-file
       options:

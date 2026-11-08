@@ -14,7 +14,10 @@ import os
 import re
 import time
 from server import server_thread
+import server
 import discord_logger
+import alerts
+import atcoder.background_sync as sync_module
 
 intents = discord.Intents.all()
 # discord_name は /user_register で自由入力されるため、"@everyone" などを入れると返信で全員に通知が飛ぶ。
@@ -264,6 +267,25 @@ def is_valid_atcoder_name(name):
   return ATCODER_NAME_RE.fullmatch(name) is not None
 
 
+USER_ERROR_MESSAGE = "⚠️ エラーが発生しました。管理者に自動で通知したので、少し時間をおいてから試してください。"
+
+
+## @brief コマンドで起きた例外を記録し、管理者に DM で知らせ、実行した人にはエラーを返す
+## @param use_followup True なら edit_original_response ではなく followup で返す (途中経過を送っているコマンド用)
+async def report_command_error(interaction, command_name, error, user_message=USER_ERROR_MESSAGE, use_followup=False):
+  summary = alerts.record_error(f"/{command_name}", error)
+  await alerts.notify_admin(
+    f"cmd-{command_name}", f"/{command_name} でエラー\n実行者: {interaction.user}\n{summary}", cooldown=10 * 60
+  )
+  try:
+    if use_followup:
+      await interaction.followup.send(content=user_message)
+    else:
+      await interaction.edit_original_response(content=user_message, embed=None)
+  except Exception as e:
+    print(f"[report_command_error] failed to reply: {e}")
+
+
 ## @brief 管理者 (ADMIN_ID) かどうか
 def is_admin(user_id):
   return admin_id is not None and str(user_id) == str(admin_id)
@@ -317,13 +339,46 @@ def abc_ranking_fields(rated, unrated):
 ## @details 1秒ごとに、提出・コンテスト履歴それぞれで一番古いユーザーを1人ずつ更新する
 ##          (提出は5分ごと、コンテスト履歴は24時間ごとが目安)。API のアクセス間隔は http_client が守る。
 ##          コマンドはこの同期結果 (DB) を読むだけなので、登録人数が増えてもすぐに応答できる。
+SYNC_ALERT_STREAK = 10  # 連続でこの回数失敗したら管理者に知らせる (失敗のたびに60秒止まるので約10分)
+SYNC_KIND_LABELS = {"submission": "提出 (kenkoooo)", "contest": "コンテスト履歴 (atcoder.jp)"}
+_sync_alerted = set()
+
 @tasks.loop(seconds=1)
 async def background_sync():
   try:
     await sync_step(DB_FILE)
   except Exception as e:
     # 例外で tasks.loop が止まると同期が永久に止まるので、必ず捕まえる
-    print(f"[background_sync] Error: {e}")
+    summary = alerts.record_error("background_sync", e)
+    await alerts.notify_admin("background_sync-exception", f"バックグラウンド同期で例外\n{summary}")
+  await check_sync_alerts()
+
+
+## @brief 同期が続けて失敗していれば管理者に知らせ、直ったら復旧を知らせる
+async def check_sync_alerts():
+  for kind, label in SYNC_KIND_LABELS.items():
+    streak = sync_module.fail_streak[kind]
+    if streak >= SYNC_ALERT_STREAK and kind not in _sync_alerted:
+      _sync_alerted.add(kind)
+      await alerts.notify_admin(f"sync-{kind}", f"{label} の同期が {streak} 回続けて失敗しています。API が落ちている可能性があります", cooldown=6 * 60 * 60)
+    elif streak == 0 and kind in _sync_alerted:
+      _sync_alerted.discard(kind)
+      await alerts.notify_admin(f"sync-{kind}-recovered", f"✅ {label} の同期が復旧しました", cooldown=0)
+
+
+## @brief /health 用: Discord に接続していて、同期が続けて失敗していなければ正常
+def bot_health():
+  connected = client.is_ready() and not client.is_closed()
+  streaks = dict(sync_module.fail_streak)
+  oldest = get_oldest_submission_sync(DB_FILE)
+  detail = {
+    "discord_connected": connected,
+    "sync_fail_streak": streaks,
+    "oldest_submission_sync_age_sec": int(time.time() - oldest) if oldest else None,
+    "uptime_sec": int(time.time() - alerts.started_at),
+  }
+  ok = connected and all(v < SYNC_ALERT_STREAK for v in streaks.values())
+  return ok, detail
 
 @background_sync.before_loop
 async def before_background_sync():
@@ -489,7 +544,8 @@ async def _post_weekly_ranking():
     print(f"[weekly_ranking_post] Posted week {week_number} of cycle {cycle_id}")
 
   except Exception as e:
-    print(f"[weekly_ranking_post] Error: {e}")
+    summary = alerts.record_error("weekly_ranking_post", e)
+    await alerts.notify_admin("weekly_ranking_post", f"週次ランキングの投稿に失敗しました\n{summary}")
 
 @weekly_ranking_post.before_loop
 async def before_weekly_ranking_post():
@@ -583,7 +639,11 @@ async def auto_abc_ranking():
       # 送信に失敗したら次のtickで再試行する。ただし失敗し続けると以降のABCが全て止まるので、
       # ABC_POST_MAX_FAILURES 回失敗したら諦めて次のコンテストへ進める
       _abc_post_failures[next_number] = _abc_post_failures.get(next_number, 0) + 1
-      print(f"[auto_abc_ranking] Failed to post {contest_id} ({_abc_post_failures[next_number]}/{ABC_POST_MAX_FAILURES}): {e}")
+      summary = alerts.record_error("auto_abc_ranking", e)
+      await alerts.notify_admin(
+        f"abc-post-{next_number}",
+        f"{contest_id} のランキング投稿に失敗しました ({_abc_post_failures[next_number]}/{ABC_POST_MAX_FAILURES})\n{summary}",
+      )
       if _abc_post_failures[next_number] >= ABC_POST_MAX_FAILURES:
         set_prev_contest(next_number, DB_FILE)
         print(f"[auto_abc_ranking] Gave up posting {contest_id}")
@@ -595,7 +655,8 @@ async def auto_abc_ranking():
     request_contest_resync([d["atcoder_name"] for d in rated + unrated], DB_FILE)
 
   except Exception as e:
-    print(f"[auto_abc_ranking] Error: {e}")
+    summary = alerts.record_error("auto_abc_ranking", e)
+    await alerts.notify_admin("auto_abc_ranking", f"ABC自動投稿の処理で例外\n{summary}", cooldown=6 * 60 * 60)
 
 @auto_abc_ranking.before_loop
 async def before_auto_abc_ranking():
@@ -610,6 +671,8 @@ _commands_synced = False
 async def on_ready():
   global _commands_synced
   init_db(DB_FILE)
+  alerts.setup(client, admin_id)
+  server.health_provider = bot_health
   # 自動投稿タスクを先に起動する (sync が失敗しても自動投稿は止めない)
   if not daily_update.is_running():
     daily_update.start()
@@ -746,8 +809,7 @@ async def rating_command(interaction: discord.Interaction, atcoder_name: str):
       embed.set_footer(text = "偉すぎるぜbro\n")
     await interaction.edit_original_response(embed = embed)
   except Exception as e:
-    print(e)
-    await interaction.edit_original_response(content=f"⚠️ エラーが発生しました。お手数ですが(<@{admin_id}>)までご連絡ください。")
+    await report_command_error(interaction, "syozin", e)
 
 
 ## @brief ユーザーをDBに登録するコマンド
@@ -805,8 +867,7 @@ async def user_register(interaction: discord.Interaction, atcoder_name: str, dis
     await initial_fetch_user_data(atcoder_name, DB_FILE)
     await interaction.followup.send(f"✅ {atcoder_name} のデータ取得が完了しました")
   except Exception as e:
-    print(e)
-    await interaction.followup.send(content=f"⚠️ エラーが発生しました。お手数ですが(<@{admin_id}>)までご連絡ください。")
+    await report_command_error(interaction, "user_register", e, use_followup=True)
 
 
 ## @brief user_unregister の atcoder_name オートコンプリート (登録済みユーザー一覧)
@@ -861,8 +922,7 @@ async def user_list(interaction: discord.Interaction):
     pages = build_pages(f"登録ユーザー ({len(fields)}人)", 0x3498db, interaction.created_at, fields)
     await send_pages_to_interaction(interaction, pages)
   except Exception as e:
-    print(e)
-    await interaction.edit_original_response(content=f"⚠️ エラーが発生しました。お手数ですが(<@{admin_id}>)までご連絡ください。")
+    await report_command_error(interaction, "user_list", e)
 
 
 ## @brief レート変化を主軸にしたランキングを表示するコマンド
@@ -908,8 +968,7 @@ async def diligence_growth(interaction: discord.Interaction, period: app_command
     file = discord.File(graph_buf, filename="ac_rate.png") if graph_buf is not None else None
     await send_pages_to_interaction(interaction, pages, file, "ac_rate.png")
   except Exception as e:
-    print(e)
-    await interaction.edit_original_response(content=f"⚠️ エラーが発生しました。お手数ですが(<@{admin_id}>)までご連絡ください。")
+    await report_command_error(interaction, "diligence_growth", e)
 
 
 ## @brief 点数を主軸にしたランキングを表示するコマンド (diligence_growthの点数版)
@@ -976,8 +1035,7 @@ async def diligence_growth_point(interaction: discord.Interaction, period: app_c
     file = discord.File(graph_buf, filename="point_rate.png") if graph_buf is not None else None
     await send_pages_to_interaction(interaction, pages, file, "point_rate.png")
   except Exception as e:
-    print(e)
-    await interaction.edit_original_response(content=f"⚠️ エラーが発生しました。お手数ですが(<@{admin_id}>)までご連絡ください。")
+    await report_command_error(interaction, "diligence_growth_point", e)
 
 
 ## @brief 全登録ユーザーの現在のAC数と連続AC日数を表示するコマンド
@@ -1010,8 +1068,7 @@ async def everyone_state(interaction: discord.Interaction):
     pages = build_pages(f"全員の精進状況 ({len(fields)}人)", 0x3498db, interaction.created_at, fields, footer=sync_footer())
     await send_pages_to_interaction(interaction, pages)
   except Exception as e:
-    print(e)
-    await interaction.edit_original_response(content=f"⚠️ エラーが発生しました。お手数ですが(<@{admin_id}>)までご連絡ください。")
+    await report_command_error(interaction, "everyone_state", e)
 
 
 ## @brief 指定したABCコンテストの登録ユーザーランキングを表示するコマンド
@@ -1041,9 +1098,9 @@ async def abc_ranking(interaction: discord.Interaction, contest_number: int):
     )
     await send_pages_to_interaction(interaction, pages)
   except Exception as e:
-    print(e)
-    await interaction.edit_original_response(
-      content=f"⚠️ エラーが発生しました。ABC{contest_number:03d} は存在しないか、まだ終了していない可能性があります。お手数ですが(<@{admin_id}>)までご連絡ください。"
+    await report_command_error(
+      interaction, "abc_ranking", e,
+      user_message=f"⚠️ エラーが発生しました。ABC{contest_number:03d} は存在しないか、まだ終了していない可能性があります。"
     )
 
 
@@ -1052,19 +1109,46 @@ async def abc_ranking(interaction: discord.Interaction, contest_number: int):
 ## @param error 発生したAppCommandError
 @tree.error
 async def on_app_command_error(interaction: discord.Interaction, error: app_commands.AppCommandError):
-  error_message = f"<@{admin_id}> エラー起きたぞ"
+  # 各コマンドの try/except で捕まえきれなかったエラー (引数の変換失敗など)
   command_name = interaction.command.name if interaction.command else "不明"
-  print(f"コマンド'{command_name}'でエラー発生: {error}")
+  summary = alerts.record_error(f"/{command_name}", error)
+  await alerts.notify_admin(f"cmd-{command_name}", f"/{command_name} でエラー\n実行者: {interaction.user}\n{summary}", cooldown=10 * 60)
   try:
     if interaction.response.is_done():
-      await interaction.followup.send(content=error_message, ephemeral=True)
+      await interaction.followup.send(content=USER_ERROR_MESSAGE, ephemeral=True)
     else:
-      await interaction.response.send_message(error_message, ephemeral=True)
-    if admin_id:
-      admin = await client.fetch_user(int(admin_id))
-      await admin.send(f"エラー\n: '/{command_name}'\n実行者: {interaction.user}\nエラー内容{error}")
+      await interaction.response.send_message(USER_ERROR_MESSAGE, ephemeral=True)
   except Exception as e:
-    print(f"エラー発生: {e}")
+    print(f"[on_app_command_error] failed to reply: {e}")
+
+
+## @brief Bot の状態を表示する管理者用コマンド (本人にだけ見える)
+@tree.command(name="bot_status", description="(管理者用) Botの同期状況と直近のエラーを表示します")
+async def bot_status(interaction: discord.Interaction):
+  if not is_admin(interaction.user.id):
+    await interaction.response.send_message("このコマンドは管理者だけが使えます", ephemeral=True)
+    return
+  ok, detail = bot_health()
+  users = get_user_dict(DB_FILE)
+  age = detail["oldest_submission_sync_age_sec"]
+  uptime_h = detail["uptime_sec"] / 3600
+  lines = [
+    f"状態: {'✅ 正常' if ok else '⚠️ 異常あり'}",
+    f"Discord: {'接続中' if detail['discord_connected'] else '切断'}　応答速度: {client.latency * 1000:.0f}ms",
+    f"登録ユーザー: {len(users)}人",
+    f"提出データの古さ (最大): {age // 60 if age is not None else '-'}分",
+    "同期の連続失敗: " + "、".join(f"{SYNC_KIND_LABELS[k]} {v}回" for k, v in detail["sync_fail_streak"].items()),
+    f"起動してから: {uptime_h:.1f}時間",
+  ]
+  if alerts.recent_errors:
+    lines.append("\n直近のエラー:")
+    for t, where, summary in list(alerts.recent_errors)[-5:]:
+      when = datetime.datetime.fromtimestamp(t, JST).strftime("%m/%d %H:%M")
+      lines.append(f"・{when} {where}: {summary[:150]}")
+  else:
+    lines.append("\n直近のエラー: なし")
+  embed = discord.Embed(title="🩺 Bot の状態", description=_truncate("\n".join(lines), 4000), color=0x2ecc71 if ok else 0xe74c3c)
+  await interaction.response.send_message(embed=embed, ephemeral=True)
 
 server_thread()
 client.run(config.DISCORD_TOKEN)
