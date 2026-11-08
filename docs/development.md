@@ -37,7 +37,7 @@ app/
     fetch_and_cache_contest_history.py コンテスト履歴をAtCoder APIから取得しDBにキャッシュ
     fetch_and_cache_ac_submissions.py  AC提出をkenkoooo APIから取得しDBにキャッシュ
     get_ac_count.py                    総AC数を返す (DBキャッシュ優先、なければAPI)
-    count_period_ac.py                 指定期間のAC数と合計点数を返す [ac_count, point_sum]
+    count_period_ac.py                 指定期間の [総合AC, 点数, 新規AC] を返す (総合ACは問題・JST日付ごとに1回)
     get_latest_rating_from_db.py       DBキャッシュから最新レートを返す
     get_rate_heart.py                  レート値に応じたハート絵文字を返す
     parse_atcoder_time.py              AtCoderの日時文字列をdatetimeに変換
@@ -81,7 +81,7 @@ app/
 |---|---|---|
 | atcoder_name | str | AtCoderユーザー名 |
 
-表示内容: 通算AC数、今日のAC数、今日の獲得点数
+表示内容: 今日の総合AC・新規AC・獲得点数、これまでに解いた問題数
 
 登録済みユーザーの場合は、表示前に提出キャッシュを差分更新する。
 

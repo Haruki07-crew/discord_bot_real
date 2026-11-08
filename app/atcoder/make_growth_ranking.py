@@ -12,6 +12,7 @@ async def make_growth_ranking(user_name_dict, day, db_file="database.db", end_un
       "discord_name": entry["discord_name"],
       "ac": entry["ac"][0],
       "point": entry["ac"][1],
+      "new_ac": entry["ac"][2] if len(entry["ac"]) > 2 else None,
       "rate_change": rate_data.get(name, {}).get("rate_change", 0),
     })
 
