@@ -27,3 +27,5 @@ def init_db(db_file):
       pass
   init_progress_tables(db_file)
   init_auto_post_table(db_file)
+  from atcoder.verification import init_verification_table
+  init_verification_table(db_file)

@@ -192,6 +192,61 @@ class TestRegister(Base):
     self.assertEqual([u[0] for u in self.users()], ["second_acc"])
 
 
+class TestVerification(Base):
+  def setUp(self):
+    super().setUp()
+    import config
+    self.config = config
+    config.REQUIRE_ATCODER_VERIFICATION = True
+    async def exists(name):
+      return True
+    self.ns["atcoder_user_exists"] = exists
+    self.ns["initial_fetch_user_data"] = no_refresh
+    self.ns["admin_id"] = "999"
+    self.affiliation = ""
+    async def contains(name, code):
+      return code in self.affiliation
+    self.ns["affiliation_contains"] = contains
+
+  def tearDown(self):
+    self.config.REQUIRE_ATCODER_VERIFICATION = False
+
+  def registered(self):
+    with dbconn(self.db) as c:
+      return [r[0] for r in c.execute("SELECT atcoder_name FROM users")]
+
+  def test_member_must_put_code_in_affiliation(self):
+    it = FakeInteraction(self.rec, user_id=5)
+    self.run_async(self.ns["user_register"].callback(it, "my_acc", "A"))
+    self.assertEqual(self.registered(), [])
+    code = self.ns["get_pending_verification"](5, self.db)[2]
+    self.assertIn(code, self.rec.titles()[-1])
+    self.run_async(self.ns["user_verify"].callback(it))
+    self.assertIn("見つかりません", self.rec.titles()[-1])
+    self.affiliation = f"Some Univ {code}"
+    self.run_async(self.ns["user_verify"].callback(it))
+    self.assertEqual(self.registered(), ["my_acc"])
+    self.assertIsNone(self.ns["get_pending_verification"](5, self.db))
+
+  def test_code_expires(self):
+    import time as _time
+    self.ns["create_pending_verification"](5, "my_acc", "A", self.db)
+    self.assertIsNone(self.ns["get_pending_verification"](5, self.db, now=_time.time() + 3601))
+
+  def test_admin_skips_verification(self):
+    it = FakeInteraction(self.rec, user_id=999)
+    self.run_async(self.ns["user_register"].callback(it, "someone", "S"))
+    self.assertEqual(self.registered(), ["someone"])
+
+  def test_affiliation_parser(self):
+    from atcoder.verification import affiliation_of
+    page = ('<tr><th class="no-break">Affiliation</th><td class="break-all"> AtCoder Inc. &amp; atcbot-1a2b3c4d</td></tr>'
+            '<p>atcbot-ffffffff</p>')
+    self.assertEqual(affiliation_of(page), "AtCoder Inc. & atcbot-1a2b3c4d")
+    self.assertEqual(affiliation_of('<th>所属</th><td>大学</td>'), "大学")
+    self.assertEqual(affiliation_of("<html></html>"), "")
+
+
 class TestWeekly(Base):
   def setUp(self):
     super().setUp()

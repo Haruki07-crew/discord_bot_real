@@ -37,8 +37,9 @@ async def wait_turn(host):
     st["last"][host] = time.monotonic()
 
 
-async def get(url, log=None, parse_json=True):
-  """GET して (status, data) を返す。data は status が 200 のときだけ JSON (parse_json=False なら None)。
+async def get(url, log=None, parse_json=True, as_text=False):
+  """GET して (status, data) を返す。data は status が 200 のときだけ JSON
+  (as_text=True なら本文の文字列、parse_json=False なら None)。
   通信エラーやタイムアウトは例外として呼び出し元に投げる。
   log を渡すと discord_logger に「APIを叩いた: {log}」と記録する。"""
   await wait_turn(urlsplit(url).hostname)
@@ -46,7 +47,11 @@ async def get(url, log=None, parse_json=True):
     await discord_logger.log_api(f"APIを叩いた: {log}")
   async with aiohttp.ClientSession(headers=HEADERS) as session:
     async with session.get(url, timeout=TIMEOUT) as resp:
-      if resp.status != 200 or not parse_json:
+      if resp.status != 200:
+        return resp.status, None
+      if as_text:
+        return resp.status, await resp.text()
+      if not parse_json:
         return resp.status, None
       return resp.status, await resp.json(content_type=None)
 
