@@ -367,6 +367,25 @@ class TestPaging(Base):
     self.assertEqual(self.run_async(run()), 1)
     self.assertEqual([e.footer.text for e in shown], ["2/3 ページ", "3/3 ページ", "2/3 ページ"])
 
+  def test_timeout_disables_buttons_with_bot_token(self):
+    pages = self.ns["build_pages"]("T", 0, None, [(str(i), "v") for i in range(25)])
+    edited = []
+
+    class Partial:
+      async def edit(self, view=None):
+        edited.append([item.disabled for item in view.children])
+
+    class Channel:
+      def get_partial_message(self, message_id):
+        return Partial()
+
+    async def run():
+      view = self.ns["PageView"](pages)
+      view.message = type("M", (), {"id": 1, "channel": Channel()})()
+      await view.on_timeout()
+    self.run_async(run())
+    self.assertEqual(edited, [[True, True]])
+
   def test_top_fields_and_text_file(self):
     fields = [(f"{i + 1}位 : u{i}", f"Rate: **+{i}**") for i in range(15)]
     top = self.ns["top_fields"](fields)

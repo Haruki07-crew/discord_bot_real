@@ -156,6 +156,9 @@ class PageView(discord.ui.View):
 
   async def _show(self, interaction):
     self._refresh_buttons()
+    # ボタンが押されたメッセージを覚えておく (on_timeout で Bot 自身の権限で編集するため)
+    if getattr(interaction, "message", None) is not None:
+      self.message = interaction.message
     await interaction.response.edit_message(embed=self.pages[self.index], view=self)
 
   @discord.ui.button(label="◀", style=discord.ButtonStyle.secondary)
@@ -169,21 +172,27 @@ class PageView(discord.ui.View):
     await self._show(interaction)
 
   async def on_timeout(self):
-    # 期限が切れたらボタンを押せないようにする (押しても反応しないボタンを残さない)
+    # 期限が切れたらボタンを押せないようにする (押しても反応しないボタンを残さない)。
+    # スラッシュコマンドの応答トークンは15分で切れるので、interaction 経由ではなく
+    # チャンネルのメッセージとして Bot 自身の権限で編集する。
     for item in self.children:
       item.disabled = True
-    if self.message is not None:
-      try:
-        await self.message.edit(view=self)
-      except Exception:
-        pass
+    msg = self.message
+    if msg is None:
+      return
+    try:
+      await msg.channel.get_partial_message(msg.id).edit(view=self)
+    except Exception as e:
+      print(f"[PageView] failed to disable buttons: {e}")
 
 
 ## @brief ページ付きで defer 済みインタラクションに応答する (2ページ以上ならボタンを付ける)
 async def send_pages_to_interaction(interaction, pages, file=None, image_name=None):
   kwargs = {"content": None, "embed": pages[0]}
   if file is not None:
-    pages[0].set_image(url=f"attachment://{image_name}")
+    # 全ページに同じ画像を設定する (1ページ目だけだと、ページを切り替えたとき画像が Embed の外に出る)
+    for page in pages:
+      page.set_image(url=f"attachment://{image_name}")
     kwargs["attachments"] = [file]
   view = None
   if len(pages) > 1:
