@@ -16,6 +16,7 @@ from atcoder.fetch_and_cache_contest_history import fetch_and_cache_contest_hist
 from atcoder.fetch_and_cache_ac_submissions import fetch_and_cache_ac_submissions
 from atcoder.initial_fetch_user_data import initial_fetch_user_data, refresh_users_data
 from atcoder.backup_database import backup_database
+from atcoder.background_sync import sync_step, request_contest_resync, get_oldest_submission_sync
 
 # 集計
 from atcoder.parse_atcoder_time import parse_atcoder_time
@@ -53,6 +54,7 @@ __all__ = [
   "get_registered_user", "get_register_id", "atcoder_user_exists",
   "fetch_and_cache_contest_history", "fetch_and_cache_ac_submissions",
   "initial_fetch_user_data", "refresh_users_data", "backup_database",
+  "sync_step", "request_contest_resync", "get_oldest_submission_sync",
   "parse_atcoder_time", "get_ac_count", "count_period_ac", "get_period_start_unix", "AC_fight",
   "make_growth_ranking", "get_ac_rate_change_data", "get_progress_data", "get_ac_streak",
   "get_latest_rating_from_db", "get_rate_heart",

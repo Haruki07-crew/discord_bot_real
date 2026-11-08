@@ -29,6 +29,7 @@ app/
     get_register_id.py     登録者IDを返す (解除権限チェック用)
 
     --- データ取得・キャッシュ ---
+    background_sync.py                 バックグラウンド同期 (sync_step)。一番古いユーザーから1人ずつ提出・コンテスト履歴を更新
     http_client.py                     外部APIへのリクエストを集約。同じホストへは Bot 全体で1秒に1回まで
     initial_fetch_user_data.py        コンテスト履歴 + AC提出を一括取得 / refresh_users_data (集計前の差分更新)
     atcoder_user_exists.py            ユーザーページの404でAtCoderユーザーの存在を確認
@@ -109,7 +110,7 @@ AtCoderユーザーをBotに登録する。
 ### /everyone_state
 
 全登録ユーザーの総AC数と連続AC日数を一覧表示する。
-表示前に全登録ユーザーのキャッシュを差分更新する (daily_update 前だと前日夜のACが未反映で連続日数が途切れて見えるため)。
+バックグラウンド同期済みのデータを読むだけ (フッターに何分前のデータかを表示)。
 
 表示内容: 各ユーザーの総AC数、昨日から遡って何日連続でACしているか (今日の分は含めない)
 
@@ -125,7 +126,7 @@ AtCoderユーザーをBotに登録する。
 
 ソート: レート変化(降順) -> AC数(降順)
 
-表示前に全登録ユーザーのキャッシュを差分更新する (登録人数 × 1〜3秒ほどかかる)。
+バックグラウンド同期済みのデータを読むだけ (フッターに何分前のデータかを表示)。
 
 グラフ:
 - 7日以内: 散布図 (横軸: AC数, 縦軸: レート変化)
@@ -169,13 +170,22 @@ ADMIN_IDのユーザーが特定のメッセージを送信すると、事前定
 
 ## 自動タスク
 
+### background_sync
+
+1秒ごとに `sync_step()` を実行する。提出 (kenkoooo) とコンテスト履歴 (atcoder.jp) について、同期が一番古いユーザーを1人ずつ更新する。
+
+- 提出は5分ごと、コンテスト履歴は24時間ごとが目安。ABC の自動投稿後は、参加者のコンテスト履歴を優先して取り直す (`request_contest_resync`)。
+- 取得に失敗した種類は60秒止める (落ちている API を叩き続けない)。
+- ホストごとに1秒に1回の制限は http_client が守る。1000人なら一巡約17分。
+- コマンドは DB を読むだけ。`/syozin` で登録済みユーザーを指定したときだけ、その1人をその場で更新する。
+
 ### daily_update
 
-毎日 1:00 JST に実行。全登録ユーザーのコンテスト履歴とAC提出をAPIから取得し、DBキャッシュを更新する。ユーザー間で1.5秒のインターバルを入れてAPIレート制限を回避する。
+毎日 1:00 JST に DB を `<DBのフォルダ>/backups/` にバックアップする (14日分)。
 
 ### weekly_ranking_post
 
-毎週月曜 0:15 JST に実行。daily_update より前に走るため、集計前に全登録ユーザーのキャッシュを差分更新する。
+毎週月曜 0:15 JST に実行。日曜深夜の提出やレート確定を確実に含めるため、集計前に全登録ユーザーを更新する (コンテスト履歴は必ず取り直す)。
 同じ日に二重に実行されても週番号が進まないよう、`bot_state` の `weekly_last_posted` に投稿日を記録する。
 
 1. 直近1週間のAC数・点数・レート変化のランキングをテキストで投稿
@@ -337,14 +347,13 @@ Bot全体のキーバリューストア。現在は `prev_contest` の管理に�
       -> fetch_and_cache_ac_submissions()   ... AC提出を全件取得しDBに保存
 ```
 
-### 日次データ更新 (daily_update, 毎日 1:00 JST)
+### バックグラウンド同期 (background_sync, 1秒ごと)
 
 ```
-daily_update
-  -> get_user_dict()                ... 全登録ユーザーを取得
-  -> initial_fetch_user_data()      ... 各ユーザーの差分データを取得
-      -> fetch_and_cache_contest_history()  ... 前回から10分以上経過していれば再取得
-      -> fetch_and_cache_ac_submissions()   ... 前回の最終提出時刻(from_second)から差分取得
+background_sync
+  -> sync_step()
+      -> 提出の同期が5分以上前のユーザーのうち最も古い1人 -> fetch_and_cache_ac_submissions()
+      -> コンテスト履歴が24時間以上前 (または再取得要求あり) の最も古い1人 -> fetch_and_cache_contest_history(force=True)
 ```
 
 ### 週次ランキング投稿 (weekly_ranking_post, 毎週月曜 0:15 JST)
@@ -384,7 +393,6 @@ auto_abc_ranking
 ```
 /everyone_state
   -> get_user_dict()       ... 全登録ユーザーを取得
-  -> refresh_users_data()  ... 全ユーザーのキャッシュを差分更新
   -> get_ac_count()        ... 各ユーザーの総AC数を取得
   -> get_ac_streak()       ... 各ユーザーの連続AC日数を算出
 ```
@@ -397,7 +405,7 @@ auto_abc_ranking
 
 起動時の処理 (on_ready):
 1. DBの全テーブルを初期化 (init_db)
-2. バックグラウンドタスクを開始 (daily_update, weekly_ranking_post, auto_abc_ranking)
+2. バックグラウンドタスクを開始 (background_sync, daily_update, weekly_ranking_post, auto_abc_ranking)
 3. スラッシュコマンドをDiscordに同期 (tree.sync)。起動後1回だけ行い、失敗しても続行する
 4. ログ出力用チャンネルを設定
 5. prev_contestが未設定の場合、APIから直近のABC番号を取得して初期化 (失敗時は auto_abc_ranking で再試行)

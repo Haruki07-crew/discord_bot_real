@@ -217,6 +217,71 @@ class TestRateLimit(unittest.TestCase):
     self.assertLess(b_time - a[0], 0.1)  # 別ホストは待たされない
 
 
+class TestBackgroundSync(Base):
+  def setUp(self):
+    super().setUp()
+    import sys
+    self.bs = sys.modules["atcoder.background_sync"]
+    self.bs._pause_until.update({"submission": 0.0, "contest": 0.0})
+    self.calls = []
+    self.fail = set()
+    db = self.db
+
+    async def fake_subs(name, db_file):
+      self.calls.append(("submission", name))
+      if "submission" not in self.fail:
+        with sqlite3.connect(db_file) as c:
+          c.execute("INSERT OR IGNORE INTO update_bookmark (atcoder_name) VALUES (?)", (name,))
+          c.execute("UPDATE update_bookmark SET submission_last_fetch = ? WHERE atcoder_name = ?", (time.time(), name))
+
+    async def fake_contest(name, db_file, force=False):
+      self.calls.append(("contest", name))
+      if "contest" not in self.fail:
+        with sqlite3.connect(db_file) as c:
+          c.execute("INSERT OR IGNORE INTO update_bookmark (atcoder_name) VALUES (?)", (name,))
+          c.execute("UPDATE update_bookmark SET contest_last_fetched = ? WHERE atcoder_name = ?", (time.time(), name))
+
+    self._orig = (self.bs.fetch_and_cache_ac_submissions, self.bs.fetch_and_cache_contest_history)
+    self.bs.fetch_and_cache_ac_submissions = fake_subs
+    self.bs.fetch_and_cache_contest_history = fake_contest
+    with sqlite3.connect(db) as c:
+      for i, name in enumerate(["u1", "u2", "u3"]):
+        c.execute("INSERT INTO users VALUES (?, ?, 1, 1)", (name, name))
+      # u2 は提出が一番古い、u3 は一度も同期していない (bookmark なし)
+      c.execute("INSERT INTO update_bookmark (atcoder_name, submission_last_fetch, contest_last_fetched) VALUES ('u1', ?, ?)", (time.time() - 400, time.time()))
+      c.execute("INSERT INTO update_bookmark (atcoder_name, submission_last_fetch, contest_last_fetched) VALUES ('u2', ?, ?)", (time.time() - 1000, time.time()))
+
+  def tearDown(self):
+    self.bs.fetch_and_cache_ac_submissions, self.bs.fetch_and_cache_contest_history = self._orig
+
+  def test_picks_most_stale_first_and_finishes(self):
+    order = []
+    for _ in range(5):
+      picked = self.run_async(self.bs.sync_step(self.db))
+      order.append((picked["submission"], picked["contest"]))
+    self.assertEqual([o[0] for o in order], ["u3", "u2", "u1", None, None])
+    self.assertEqual([o[1] for o in order], ["u3", None, None, None, None])
+
+  def test_contest_resync_request_is_prioritized(self):
+    self.run_async(self.bs.sync_step(self.db))  # u3 の初回同期
+    self.ns["request_contest_resync"](["U1"], self.db)
+    picked = self.run_async(self.bs.sync_step(self.db))
+    self.assertEqual(picked["contest"], "u1")
+
+  def test_failure_pauses_that_kind(self):
+    self.fail.add("submission")
+    self.run_async(self.bs.sync_step(self.db))
+    picked = self.run_async(self.bs.sync_step(self.db))
+    self.assertIsNone(picked["submission"])  # 失敗したので一時停止中
+    self.assertEqual([c for c in self.calls if c[0] == "submission"], [("submission", "u3")])
+
+  def test_footer_reports_age(self):
+    self.assertIn("同期中", self.ns["sync_footer"]())  # u3 は未同期
+    for _ in range(3):
+      self.run_async(self.bs.sync_step(self.db))
+    self.assertIn("最大0分前", self.ns["sync_footer"]())
+
+
 class TestLogger(unittest.TestCase):
   def test_chunks_fit_discord_limit(self):
     import discord_logger
