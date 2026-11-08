@@ -23,8 +23,8 @@ async def command_name(interaction: discord.Interaction, atcoder_name: str):
       return
 
     fields = [(f"{discord_name} ({name})", f"値: **{...}**") for name, discord_name in user.items()]
-    embeds = build_embeds("タイトル", 0x3498db, interaction.created_at, fields)
-    await send_embeds_to_interaction(interaction, embeds)        # 2通目以降は followup で送られる
+    pages = build_pages("タイトル", 0x3498db, interaction.created_at, fields)   # 1ページ10人
+    await send_pages_to_interaction(interaction, pages)          # 2ページ以上なら ◀ ▶ ボタンが付く
   except Exception as e:
     print(e)
     await interaction.edit_original_response(content=f"⚠️ エラーが発生しました。お手数ですが(<@{admin_id}>)までご連絡ください。")
@@ -33,8 +33,10 @@ async def command_name(interaction: discord.Interaction, atcoder_name: str):
 ## チェックリスト
 
 - **Embed**
-  - `discord.Embed` に直接 `add_field` しない。`build_embeds()` を使う。登録者が26人を超えると Discord の上限で送信できなくなるため
+  - `discord.Embed` に直接 `add_field` しない。人数分の一覧は `build_pages()` でページに分ける(1000人いても1通で済む)
+  - 自動投稿(ボタンが使えない)は `top_fields()` で上位10人に絞り、全員分は `ranking_text_file()` で添付する
   - 複数行のテキストは `lines_to_fields()` でフィールドに分ける
+  - グラフは `graph_targets()` で上位10人と本人に絞る
 - **画像**
   - `discord.File` は1度しか送れない。再送するときは BytesIO を `seek(0)` してから作り直す
 - **期間**

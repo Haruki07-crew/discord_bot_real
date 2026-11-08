@@ -9,6 +9,7 @@ import config as config
 from atcoder import *
 import asyncio
 import datetime
+import io
 import os
 import re
 import time
@@ -114,6 +115,122 @@ async def send_embeds_to_interaction(interaction, embeds, file=None, image_name=
     await interaction.edit_original_response(content=None, embed=embeds[0])
   for e in embeds[1:]:
     await interaction.followup.send(embed=e)
+
+
+# ---- ページ送り・上位N人表示 ----
+# 登録者が数百〜1000人になると、全員分を Embed で送ると数十通の連投になって読めない。
+# コマンドの返信は1ページ10人でボタンでページを送り、自動投稿は上位10人 + 全順位のテキストファイルにする。
+PAGE_SIZE = 10
+PAGE_VIEW_TIMEOUT_SEC = 15 * 60
+
+
+## @brief fields を1ページ PAGE_SIZE 個ずつの Embed に分ける (ページ番号はフッターに入れる)
+def build_pages(title, color, timestamp, fields, description=None, footer=None, per_page=PAGE_SIZE):
+  chunks = [fields[i:i + per_page] for i in range(0, len(fields), per_page)] or [[]]
+  pages = []
+  for chunk in chunks:
+    # 1ページが文字数上限を超える場合は build_embeds がさらに分ける
+    pages.extend(build_embeds(title, color, timestamp, chunk, description=description))
+  for i, page in enumerate(pages):
+    page.title = title  # 「(続き)」ではなくページ番号で示す
+    text = f"{i + 1}/{len(pages)} ページ" if len(pages) > 1 else ""
+    if footer:
+      text = f"{text}　{footer}" if text else footer
+    if text:
+      page.set_footer(text=_truncate(text, 2048))
+  return pages
+
+
+## @brief ◀ ▶ ボタンでページを切り替える View
+class PageView(discord.ui.View):
+  def __init__(self, pages):
+    super().__init__(timeout=PAGE_VIEW_TIMEOUT_SEC)
+    self.pages = pages
+    self.index = 0
+    self.message = None
+    self._refresh_buttons()
+
+  def _refresh_buttons(self):
+    self.prev_button.disabled = self.index == 0
+    self.next_button.disabled = self.index >= len(self.pages) - 1
+
+  async def _show(self, interaction):
+    self._refresh_buttons()
+    await interaction.response.edit_message(embed=self.pages[self.index], view=self)
+
+  @discord.ui.button(label="◀", style=discord.ButtonStyle.secondary)
+  async def prev_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+    self.index = max(0, self.index - 1)
+    await self._show(interaction)
+
+  @discord.ui.button(label="▶", style=discord.ButtonStyle.secondary)
+  async def next_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+    self.index = min(len(self.pages) - 1, self.index + 1)
+    await self._show(interaction)
+
+  async def on_timeout(self):
+    # 期限が切れたらボタンを押せないようにする (押しても反応しないボタンを残さない)
+    for item in self.children:
+      item.disabled = True
+    if self.message is not None:
+      try:
+        await self.message.edit(view=self)
+      except Exception:
+        pass
+
+
+## @brief ページ付きで defer 済みインタラクションに応答する (2ページ以上ならボタンを付ける)
+async def send_pages_to_interaction(interaction, pages, file=None, image_name=None):
+  kwargs = {"content": None, "embed": pages[0]}
+  if file is not None:
+    pages[0].set_image(url=f"attachment://{image_name}")
+    kwargs["attachments"] = [file]
+  view = None
+  if len(pages) > 1:
+    view = PageView(pages)
+    kwargs["view"] = view
+  message = await interaction.edit_original_response(**kwargs)
+  if view is not None:
+    view.message = message
+
+
+def _plain(text):
+  return text.replace("**", "")
+
+
+## @brief 全順位をテキストファイルにする (自動投稿で上位以外の人も自分の順位を確認できるように)
+def ranking_text_file(title, fields, filename):
+  lines = [title, ""] + [f"{_plain(name)}\n    {_plain(value)}" for name, value in fields]
+  return discord.File(io.BytesIO("\n".join(lines).encode("utf-8")), filename=filename)
+
+
+## @brief 自動投稿用: 上位 PAGE_SIZE 人だけを載せ、残りの人数を書き添える
+def top_fields(fields, note="全員の順位は添付ファイルを見てください"):
+  if len(fields) <= PAGE_SIZE:
+    return fields
+  return fields[:PAGE_SIZE] + [(f"…ほか {len(fields) - PAGE_SIZE} 人", note)]
+
+
+## @brief 実行した人の順位を「あなたの順位」として返す (登録していなければ None)
+def my_rank_text(interaction, ranking, total):
+  mine = get_registered_by_discord_id(interaction.user.id, DB_FILE)
+  if not mine:
+    return None
+  for d in ranking:
+    if d["atcoder_name"].lower() == mine.lower():
+      return f"あなた ({mine}) の順位: **{d['place']}位** / {total}人"
+  return None
+
+
+## @brief グラフに描くユーザー: 上位 PAGE_SIZE 人 + 実行した本人 (全員描くと線や名前が重なって読めない)
+def graph_targets(interaction, ranking):
+  names = [d["atcoder_name"] for d in ranking[:PAGE_SIZE]]
+  mine = get_registered_by_discord_id(interaction.user.id, DB_FILE) if interaction is not None else None
+  if mine:
+    for d in ranking[PAGE_SIZE:]:
+      if d["atcoder_name"].lower() == mine.lower():
+        names.append(d["atcoder_name"])
+  return names
 
 
 ## @brief 送信処理を最大 attempts 回まで再試行する (一時的なDiscord障害で自動投稿が失われないように)
@@ -315,14 +432,19 @@ async def _post_weekly_ranking():
     ]
     save_weekly_snapshot(cycle_id, week_number, snapshot_data, DB_FILE)
 
-    # テキスト embed (今週の結果)
-    embeds = build_embeds(
-      f"🏆 Diligence & Growth [{week_number}週目]", 0xFFD700, now, growth_fields(ranking_data)
-    )
+    # テキスト embed (今週の結果)。上位10人だけ載せ、全員の順位はテキストファイルで添付する
+    weekly_title = f"🏆 Diligence & Growth [{week_number}週目]"
+    weekly_fields = growth_fields(ranking_data)
+    embeds = build_embeds(weekly_title, 0xFFD700, now, top_fields(weekly_fields))
 
     # 累積グラフ用データを取得
     # 登録解除されたユーザーの線がグラフに残らないよう、現在の登録者だけに絞る
     snapshots = {name: weeks for name, weeks in get_weekly_snapshots(cycle_id, DB_FILE).items() if name in user}
+    # 線が多すぎると読めないので、累積レート変化 (同点なら累積AC) の上位10人に絞る
+    top_names = sorted(
+      snapshots, key=lambda n: (sum(w[3] for w in snapshots[n]), sum(w[1] for w in snapshots[n])), reverse=True
+    )[:PAGE_SIZE]
+    snapshots = {n: snapshots[n] for n in top_names}
 
     # AC数版グラフ
     graph_ac = create_weekly_graph(snapshots, week_number, x_axis="ac")
@@ -336,6 +458,11 @@ async def _post_weekly_ranking():
         file_ac = discord.File(graph_ac, filename="weekly_ac.png")
       return send_embeds_to_channel(channel, embeds, file_ac, "weekly_ac.png")
     await send_with_retry(make_ac_post)
+
+    if len(weekly_fields) > PAGE_SIZE:
+      await send_with_retry(lambda: channel.send(
+        content="📄 全員の順位", file=ranking_text_file(weekly_title, weekly_fields, f"weekly_{week_number}.txt")
+      ))
 
     # 点数版は別embedで投稿
     if graph_point:
@@ -429,15 +556,20 @@ async def auto_abc_ranking():
       print(f"[auto_abc_ranking] Channel {ranking_channel_id} not found")
       return
 
+    abc_title = f"🏆 ABC{next_number:03d} 登録ユーザーランキング"
+    abc_fields = abc_ranking_fields(rated, unrated)
     embeds = build_embeds(
-      f"🏆 ABC{next_number:03d} 登録ユーザーランキング",
-      0xFFD700,
-      datetime.datetime.now(JST),
-      abc_ranking_fields(rated, unrated),
+      abc_title, 0xFFD700, datetime.datetime.now(JST), top_fields(abc_fields),
       description="コンテスト結果が確定しました！"
     )
     try:
       await send_embeds_to_channel(channel, embeds)
+      if len(abc_fields) > PAGE_SIZE:
+        try:
+          await channel.send(content="📄 全員の順位", file=ranking_text_file(abc_title, abc_fields, f"{contest_id}.txt"))
+        except Exception as e:
+          # ランキング本体は送れているので、添付だけの失敗では再投稿しない
+          print(f"[auto_abc_ranking] Failed to send full ranking file: {e}")
     except Exception as e:
       # 送信に失敗したら次のtickで再試行する。ただし失敗し続けると以降のABCが全て止まるので、
       # ABC_POST_MAX_FAILURES 回失敗したら諦めて次のコンテストへ進める
@@ -708,16 +840,17 @@ async def user_list(interaction: discord.Interaction):
     if not user:
       await interaction.edit_original_response(content="登録されているユーザーがいません")
       return
-    fields = []
-    for atcoder_name, discord_name in user.items():
-      latest_rating = get_latest_rating_from_db(atcoder_name, DB_FILE)
-      atcoder_url = f"https://atcoder.jp/users/{atcoder_name}"
-      fields.append((
-        f"{get_rate_heart(latest_rating)} {discord_name}",
-        f"Atcoder_ID: [{atcoder_name}]({atcoder_url})\n Rating: **{latest_rating}**"
-      ))
-    embeds = build_embeds("登録ユーザー", 0x3498db, interaction.created_at, fields)
-    await send_embeds_to_interaction(interaction, embeds)
+    rows = sorted(
+      ((name, discord_name, get_latest_rating_from_db(name, DB_FILE)) for name, discord_name in user.items()),
+      key=lambda r: r[2], reverse=True,
+    )
+    fields = [
+      (f"{get_rate_heart(rating)} {discord_name}",
+       f"Atcoder_ID: [{name}](https://atcoder.jp/users/{name})\n Rating: **{rating}**")
+      for name, discord_name, rating in rows
+    ]
+    pages = build_pages(f"登録ユーザー ({len(fields)}人)", 0x3498db, interaction.created_at, fields)
+    await send_pages_to_interaction(interaction, pages)
   except Exception as e:
     print(e)
     await interaction.edit_original_response(content=f"⚠️ エラーが発生しました。お手数ですが(<@{admin_id}>)までご連絡ください。")
@@ -748,22 +881,23 @@ async def diligence_growth(interaction: discord.Interaction, period: app_command
       await interaction.edit_original_response(content="登録されているユーザーがいません")
       return
 
-    embeds = build_embeds(
+    pages = build_pages(
       f"🏆 Diligence & Growth [{label}]🏆", 0xFFD700, interaction.created_at, growth_fields(ranking_data),
-      footer=sync_footer()
+      description=my_rank_text(interaction, ranking_data, len(ranking_data)), footer=sync_footer()
     )
 
+    targets = graph_targets(interaction, ranking_data)
     if day <= 7:
-      ac_rate_data = {d["atcoder_name"]: d for d in ranking_data}
+      ac_rate_data = {d["atcoder_name"]: d for d in ranking_data if d["atcoder_name"] in targets}
       graph_buf = create_ac_rate_graph(ac_rate_data, label)
     else:
       all_user_data = {}
-      for atcoder_name in user:
+      for atcoder_name in targets:
         all_user_data[atcoder_name] = await get_progress_data(atcoder_name, day, DB_FILE)
       graph_buf = create_progress_graph(all_user_data)
 
     file = discord.File(graph_buf, filename="ac_rate.png") if graph_buf is not None else None
-    await send_embeds_to_interaction(interaction, embeds, file, "ac_rate.png")
+    await send_pages_to_interaction(interaction, pages, file, "ac_rate.png")
   except Exception as e:
     print(e)
     await interaction.edit_original_response(content=f"⚠️ エラーが発生しました。お手数ですが(<@{admin_id}>)までご連絡ください。")
@@ -813,23 +947,25 @@ async def diligence_growth_point(interaction: discord.Interaction, period: app_c
       prev_rc = d["rate_change"]
       prev_pt = d["point"]
 
-    embeds = build_embeds(
+    pages = build_pages(
       f"🏆 Diligence & Growth [点数] [{label}]🏆", 0x2ecc71, interaction.created_at,
-      growth_fields(sorted_data, point_first=True), footer=sync_footer()
+      growth_fields(sorted_data, point_first=True),
+      description=my_rank_text(interaction, sorted_data, len(sorted_data)), footer=sync_footer()
     )
 
+    targets = graph_targets(interaction, sorted_data)
     if day <= 7:
       # 散布図 (横軸: 点数, 縦軸: レート変化)
-      point_rate_data = {d["atcoder_name"]: {"ac": d["point"], "rate_change": d["rate_change"]} for d in sorted_data}
+      point_rate_data = {d["atcoder_name"]: {"ac": d["point"], "rate_change": d["rate_change"]} for d in sorted_data if d["atcoder_name"] in targets}
       graph_buf = create_ac_rate_graph(point_rate_data, label, x_label="点数")
     else:
       all_user_data = {}
-      for atcoder_name in user:
+      for atcoder_name in targets:
         all_user_data[atcoder_name] = await get_progress_data(atcoder_name, day, DB_FILE, x_axis="point")
       graph_buf = create_progress_graph(all_user_data, x_label="点数")
 
     file = discord.File(graph_buf, filename="point_rate.png") if graph_buf is not None else None
-    await send_embeds_to_interaction(interaction, embeds, file, "point_rate.png")
+    await send_pages_to_interaction(interaction, pages, file, "point_rate.png")
   except Exception as e:
     print(e)
     await interaction.edit_original_response(content=f"⚠️ エラーが発生しました。お手数ですが(<@{admin_id}>)までご連絡ください。")
@@ -862,8 +998,8 @@ async def everyone_state(interaction: discord.Interaction):
         f"解いた問題数: **{ac_count}** 問　連続AC: **{streak_text}**"
       ))
 
-    embeds = build_embeds("全員の精進状況", 0x3498db, interaction.created_at, fields, footer=sync_footer())
-    await send_embeds_to_interaction(interaction, embeds)
+    pages = build_pages(f"全員の精進状況 ({len(fields)}人)", 0x3498db, interaction.created_at, fields, footer=sync_footer())
+    await send_pages_to_interaction(interaction, pages)
   except Exception as e:
     print(e)
     await interaction.edit_original_response(content=f"⚠️ エラーが発生しました。お手数ですが(<@{admin_id}>)までご連絡ください。")
@@ -890,11 +1026,11 @@ async def abc_ranking(interaction: discord.Interaction, contest_number: int):
       )
       return
 
-    embeds = build_embeds(
+    pages = build_pages(
       f"🏆 ABC{contest_number:03d} 登録ユーザーランキング", 0xFFD700, interaction.created_at,
       abc_ranking_fields(rated, unrated)
     )
-    await send_embeds_to_interaction(interaction, embeds)
+    await send_pages_to_interaction(interaction, pages)
   except Exception as e:
     print(e)
     await interaction.edit_original_response(
