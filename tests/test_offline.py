@@ -57,17 +57,27 @@ class TestPeriod(Base):
 
 
 class TestCounting(Base):
-  def test_count_period_ac_unique_and_end_bound(self):
+  def test_count_period_ac_same_day_once(self):
     t0 = today_start()
     add_user(self.db, "alice")
     add_ac(self.db, "alice", 1, "abc100_a", t0.timestamp() + 10, 100)
-    add_ac(self.db, "alice", 2, "abc100_a", t0.timestamp() + 20, 100)  # 同じ問題の再AC
+    add_ac(self.db, "alice", 2, "abc100_a", t0.timestamp() + 20, 100)  # 同じ日の再AC → 数えない
     add_ac(self.db, "alice", 3, "abc100_b", t0.timestamp() + 30, 200)
-    add_ac(self.db, "alice", 4, "abc100_c", t0.timestamp() - 10, 300)  # 昨日
+    add_ac(self.db, "alice", 4, "abc100_c", t0.timestamp() - 10, 300)  # 昨日 (期間外)
     count = self.run_async(self.ns["count_period_ac"]("alice", 1, self.db))
-    self.assertEqual(count, [2, 300])
+    self.assertEqual(count, [2, 300, 2])
     count = self.run_async(self.ns["count_period_ac"]("alice", 1, self.db, end_unix=int(t0.timestamp()) + 25))
-    self.assertEqual(count, [1, 100])
+    self.assertEqual(count, [1, 100, 1])
+
+  def test_reac_on_another_day_counts_in_total_not_new(self):
+    t0 = today_start()
+    add_user(self.db, "amy")
+    add_ac(self.db, "amy", 1, "abc1_a", (t0 - _dt.timedelta(days=10)).timestamp(), 100)  # 期間前に解いた
+    add_ac(self.db, "amy", 2, "abc1_a", (t0 - _dt.timedelta(days=2)).timestamp(), 100)   # 期間内に解き直し
+    add_ac(self.db, "amy", 3, "abc1_a", t0.timestamp() + 5, 100)                         # 今日も解き直し
+    add_ac(self.db, "amy", 4, "abc1_b", (t0 - _dt.timedelta(days=1)).timestamp(), 200)   # 期間内に初めて
+    total, point, new = self.run_async(self.ns["count_period_ac"]("amy", 7, self.db))
+    self.assertEqual((total, point, new), (3, 400, 1))
 
   def test_zero_submission_user_uses_cache(self):
     add_user(self.db, "nobody")

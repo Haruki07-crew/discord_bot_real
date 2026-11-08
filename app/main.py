@@ -153,10 +153,12 @@ def growth_fields(ranking_data, point_first=False):
   fields = []
   for data in ranking_data:
     rc_str = format_rate_change(data["rate_change"])
+    new_ac = data.get("new_ac")
+    ac_str = f"総合AC : **{data['ac']}**" + (f" (新規 **{new_ac}**)" if new_ac is not None else "")
     if point_first:
-      value = f"Rate: **{rc_str}**　点数 : **{data['point']}** 点  AC数 : **{data['ac']}** AC"
+      value = f"Rate: **{rc_str}**　点数 : **{data['point']}** 点  {ac_str}"
     else:
-      value = f"Rate: **{rc_str}**　AC数 : **{data['ac']}** AC  点数 : **{data['point']}** 点"
+      value = f"Rate: **{rc_str}**　{ac_str}  点数 : **{data['point']}** 点"
     fields.append((f"{data['figure']}{data['place']}位 : {data['atcoder_name']}({data['discord_name']})", value))
   return fields
 
@@ -591,21 +593,12 @@ async def rating_command(interaction: discord.Interaction, atcoder_name: str):
       url = problems_url,
       timestamp = interaction.created_at
     )
-    embed.add_field(
-      name = "これまでのAC数",
-      value = f"**{ac_sum}** AC",
-      inline = True
-    )
-    embed.add_field(
-      name = "今日のAC数",
-      value = f"**{ac_daily[0]}** AC",
-      inline = True
-    )
-    embed.add_field(
-      name = "今日の獲得点数",
-      value = f"**{round(ac_daily[1])}** 点",
-      inline = True
-    )
+    new_ac = f"**{ac_daily[2]}** AC" if ac_daily[2] is not None else "— (登録ユーザーのみ)"
+    embed.add_field(name="今日の総合AC", value=f"**{ac_daily[0]}** AC", inline=True)
+    embed.add_field(name="今日の新規AC", value=new_ac, inline=True)
+    embed.add_field(name="今日の獲得点数", value=f"**{round(ac_daily[1])}** 点", inline=True)
+    embed.add_field(name="これまでに解いた問題数", value=f"**{ac_sum}** 問", inline=False)
+    embed.description = "総合AC: 同じ問題でも別の日に解き直せば数える (同じ日は1回)\n新規AC: 初めて解いた問題の数"
     if ac_daily[0] == 0:
       embed.set_footer(text = "精進せんかい雑魚bro\n")
     else:
@@ -866,7 +859,7 @@ async def everyone_state(interaction: discord.Interaction):
       streak_text = f"{streak}日連続" if streak > 0 else "0日"
       fields.append((
         f"{discord_name} ({atcoder_name})",
-        f"総AC数: **{ac_count}** AC　連続AC: **{streak_text}**"
+        f"解いた問題数: **{ac_count}** 問　連続AC: **{streak_text}**"
       ))
 
     embeds = build_embeds("全員の精進状況", 0x3498db, interaction.created_at, fields, footer=sync_footer())
