@@ -150,24 +150,8 @@ scp -r <ユーザー名>@atcoder-bot.local:~/discord_bot_real/data/backups ./atc
 
 ## Azure VM で動かす
 
-1. [Azure portal](https://portal.azure.com/) で **Azure for Students** のサブスクリプションを使い、**仮想マシン** を作る。
-   - イメージ: **Ubuntu Server 24.04 LTS**(x64 / Arm64 のどちらでも可)
-   - サイズ: **B1s**(作成画面に「無料サービスの対象」と表示されるサイズを選ぶ。対象や期間は特典の内容によって変わるので、作成画面で必ず確認する)
-   - 認証: **SSH 公開キー**
-   - 受信ポート: **SSH (22) のみ**(Bot は外から接続される必要がない)
-2. 作成後、`ssh azureuser@<パブリックIP>` で接続する。
-3. B1s はメモリが 1GB で、Docker のビルド中に足りなくなることがあるので、スワップを作る。
-
-   ```bash
-   sudo fallocate -l 2G /swapfile && sudo chmod 600 /swapfile
-   sudo mkswap /swapfile && sudo swapon /swapfile
-   echo '/swapfile none swap sw 0 0' | sudo tee -a /etc/fstab
-   ```
-4. あとは **ラズパイの手順 2〜7 と同じ**。
-   - `pi` は `azureuser` に、`atcoder-bot.local` はパブリック IP に読み替える。
-   - systemd のファイルの `User` とパスも `azureuser` に合わせる。
-
-> ⚠️ Azure のクレジットや特典の期限が切れると、VM が止まります。portal の「コストの管理」で残高と期限を定期的に確認してください。
+手順が多いので別のファイルにまとめました: **[deploy-azure.md](deploy-azure.md)**
+(予算アラート、VM の作成、SSH、スワップ、自動更新の `azureuser` への書き換え、片付け方まで)
 
 ---
 
