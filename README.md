@@ -116,6 +116,8 @@ docker compose logs -f     # "activate the bot  now!!!!" が出れば成功
 - データは `data/database.db` に保存されるので、作り直しても消えません。毎日1:00に `data/backups/` へ14日分のバックアップを取ります。
 - OS の準備、非公開リポジトリの clone、`main` 更新時の自動反映、Azure での注意点は **[docs/deploy.md](docs/deploy.md)** にまとめています。
 
+- ラズパイの準備ができるまで Mac で動かす場合は **[docs/run-on-mac.md](docs/run-on-mac.md)** (Docker Desktop + `caffeinate`)。
+
 > ⚠️ 別の場所 (自分の PC など) で同じトークンの Bot が動いている場合は、先に止めてください。2つ同時に動くと自動投稿が二重になります。
 
 ### 6. 動作を確認する
