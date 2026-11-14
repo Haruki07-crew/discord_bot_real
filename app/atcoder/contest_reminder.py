@@ -8,7 +8,7 @@ from atcoder import db
 from atcoder import http_client
 
 REFRESH_SEC = 60 * 60
-REMIND_BEFORE_SEC = 30 * 60
+REMIND_BEFORE_MIN = (30, 10)  # 開始の何分前に知らせるか (大きい順)
 _ROW_RE = re.compile(r"<tr>(.*?)</tr>", re.S)
 _TIME_RE = re.compile(r"<time[^>]*>([^<]+)</time>")
 _ABC_RE = re.compile(r'href="/contests/(abc\d+)">([^<]+)</a>')
@@ -44,16 +44,29 @@ async def get_upcoming_abc(now=None):
   return _cache["contests"]
 
 
+def _reminder_key(contest_id, minutes):
+  # 30分前は以前からのキー (reminder:abcNNN) のまま。送信済みの記録を引き継ぐため
+  return f"reminder:{contest_id}" if minutes == REMIND_BEFORE_MIN[0] else f"reminder{minutes}:{contest_id}"
+
+
 def due_reminders(contests, db_file, now=None):
-  """いまリマインドすべきで、まだ送っていないコンテストを返す。"""
+  """いま送るべきで、まだ送っていないリマインドを [(コンテスト, 何分前), ...] で返す。
+  開始までの残り時間に合う一番短い区切りだけを返す (起動が開始8分前なら10分前の分だけ送り、30分前の分は送らない)。"""
   now = time.time() if now is None else now
-  due = [c for c in contests if 0 < c["start"] - now <= REMIND_BEFORE_SEC]
+  due = []
+  for contest in contests:
+    left = contest["start"] - now
+    windows = [m for m in REMIND_BEFORE_MIN if 0 < left <= m * 60]
+    if windows:
+      due.append((contest, min(windows)))
   with db.connect(db_file) as conn:
-    return [c for c in due if conn.execute(
-      "SELECT 1 FROM auto_posted_contests WHERE contest_id = ?", (f"reminder:{c['id']}",)
+    return [(c, m) for c, m in due if conn.execute(
+      "SELECT 1 FROM auto_posted_contests WHERE contest_id = ?", (_reminder_key(c["id"], m),)
     ).fetchone() is None]
 
 
-def mark_reminded(contest_id, db_file):
+def mark_reminded(contest_id, minutes, db_file):
   with db.connect(db_file) as conn:
-    conn.execute("INSERT OR IGNORE INTO auto_posted_contests VALUES (?, ?)", (f"reminder:{contest_id}", time.time()))
+    conn.execute(
+      "INSERT OR IGNORE INTO auto_posted_contests VALUES (?, ?)", (_reminder_key(contest_id, minutes), time.time())
+    )

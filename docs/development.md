@@ -85,7 +85,7 @@ app/
 - `atcoder/engagement.py`: おすすめ、スコア集計、レート進捗、次の壁
 - `atcoder/notifications.py`: `notification_prefs` / `achievements` テーブル、DM 希望、アカウントの紐づけ
 - `atcoder/achievements.py`: 実績の判定。初回判定のユーザーは過去の分を投稿せず記録する (`_initialized`)。投稿に成功してから記録する
-- `atcoder/contest_reminder.py`: atcoder.jp の予定表を1時間に1回読み、開始30分前に投稿する (送信済みは `auto_posted_contests` の `reminder:abcNNN`)
+- `atcoder/contest_reminder.py`: atcoder.jp の予定表を1時間に1回読み、開始30分前と10分前に投稿する (送信済みは `auto_posted_contests` の `reminder:abcNNN` と `reminder10:abcNNN`)
 - 定期処理: `abc_reminder_task` (1分) / `achievements_task` (30分) / `streak_reminder_task` (毎日22時) / `weekly_review_task` (月曜9時)
 
 ## 監視
