@@ -771,6 +771,50 @@ class TestEngagement(Base):
     self.assertEqual(due(8), [10])
     self.assertEqual(due(7), [])
 
+  def test_contest_dm_command_and_delivery(self):
+    import discord
+    from atcoder.contest_dm import due_contest_dms, mark_contest_dm
+    choice = lambda m: discord.app_commands.Choice(name=f"{m}分前", value=m)
+    it = FakeInteraction(self.rec, user_id=5)
+    self.run_async(self.ns["contest_dm"].callback(it, choice(15), True))
+    self.run_async(self.ns["contest_dm"].callback(it, choice(60), True))
+    self.assertEqual(len(self.dms), 2)  # 設定のたびに確認の DM
+    self.assertEqual(self.ns["get_contest_dm"](5, self.db), [60, 15])
+    # 登録していない人は使えない
+    stranger = FakeInteraction(self.rec, user_id=99)
+    self.run_async(self.ns["contest_dm"].callback(stranger, choice(15), True))
+    self.assertEqual(self.ns["get_contest_dm"](99, self.db), [])
+
+    start = 2_000_000
+    contests = [{"id": "abc600", "title": "ABC 600", "start": start}]
+    def due(minutes_left):
+      found = due_contest_dms(contests, self.db, now=start - minutes_left * 60)
+      for discord_id, _name, contest, minutes in found:
+        mark_contest_dm(discord_id, contest["id"], minutes, self.db)
+      return [(d, n, m) for d, n, _c, m in found]
+    self.assertEqual(due(90), [])
+    self.assertEqual(due(59), [(5, "alice", 60)])
+    self.assertEqual(due(30), [])
+    self.assertEqual(due(14), [(5, "alice", 15)])
+    self.assertEqual(due(3), [])
+    # オフにすると届かない
+    self.run_async(self.ns["contest_dm"].callback(it, choice(15), False))
+    contests[0]["id"] = "abc601"
+    self.assertEqual(due(14), [(5, "alice", 60)])  # 60分前の設定だけが残っている (開始直前なら一度だけ)
+    self.assertEqual(due(10), [])
+
+  def test_contest_dm_sent_by_reminder_task(self):
+    self.ns["set_contest_dm"](6, 10, True, self.db)
+    upcoming = [{"id": "abc700", "title": "ABC 700", "start": int(time.time()) + 300}]
+    async def get():
+      return upcoming
+    self.ns["get_upcoming_abc"] = get
+    self.run_async(self.ns["abc_reminder_task"].coro())
+    self.run_async(self.ns["abc_reminder_task"].coro())
+    self.assertEqual([d[0] for d in self.dms], [6])
+    self.assertIn("あと10分で **ABC 700**", self.dms[0][1])
+    self.assertEqual(len(self.rec.sent), 1)  # チャンネルの10分前リマインドも1回
+
   def test_achievements_backfill_silently_then_post_once(self):
     add_ac(self.db, "alice", 1, "abc1_b", today_start().timestamp() - 5)
     self.run_async(self.ns["achievements_task"].coro())

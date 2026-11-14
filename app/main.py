@@ -758,23 +758,31 @@ async def before_auto_abc_ranking():
 
 
 ## ---- 定期処理 (リマインド・実績・ふり返り) ----
-## @brief ABC 開始の30分前と10分前にチャンネルへ知らせる
+## @brief ABC 開始の30分前と10分前にチャンネルへ、/contest_dm で決めた時刻に本人へ DM で知らせる
 @tasks.loop(minutes=1)
 async def abc_reminder_task():
   try:
-    if ranking_channel_id is None:
-      return
-    channel = client.get_channel(ranking_channel_id)
-    if channel is None:
-      return
-    for contest, minutes in due_reminders(await get_upcoming_abc(), DB_FILE):
+    contests = await get_upcoming_abc()
+    channel = client.get_channel(ranking_channel_id) if ranking_channel_id is not None else None
+    # チャンネルへの投稿を先にする (DM の人数が多くても遅れないように)
+    for contest, minutes in (due_reminders(contests, DB_FILE) if channel is not None else []):
       start = datetime.datetime.fromtimestamp(contest["start"], JST).strftime("%H:%M")
       head = f"⏰ まもなく **{contest['title']}** が始まります" if minutes >= 30 else f"🔔 あと{minutes}分で **{contest['title']}** が始まります！"
       await channel.send(f"{head} ({start} 開始)\nhttps://atcoder.jp/contests/{contest['id']}")
       mark_reminded(contest["id"], minutes, DB_FILE)
+    await send_contest_dms(contests)
   except Exception as e:
     summary = alerts.record_error("abc_reminder_task", e)
     await alerts.notify_admin("abc_reminder_task", f"ABCリマインドで例外\n{summary}", cooldown=6 * 60 * 60)
+
+
+## @brief /contest_dm で希望した人に、ABC 開始前の DM を送る
+async def send_contest_dms(contests):
+  for discord_id, atcoder_name, contest, minutes in due_contest_dms(contests, DB_FILE):
+    start = datetime.datetime.fromtimestamp(contest["start"], JST).strftime("%H:%M")
+    await send_dm(discord_id, f"🔔 {atcoder_name} さん、あと{minutes}分で **{contest['title']}** が始まります ({start} 開始)\nhttps://atcoder.jp/contests/{contest['id']}")
+    # DM を受け取らない設定の人に毎分送り直さないよう、失敗しても送信済みにする
+    mark_contest_dm(discord_id, contest["id"], minutes, DB_FILE)
 
 
 ## @brief 新しく達成した実績をチャンネルへ投稿する
@@ -1411,6 +1419,31 @@ async def notify(interaction: discord.Interaction, kind: app_commands.Choice[str
     await interaction.edit_original_response(content=f"{kind.name}: {'オン' if enabled else 'オフ'}にしました ({name}){extra}")
   except Exception as e:
     await report_command_error(interaction, "notify", e)
+
+
+## @brief ABC 開始前の DM を受け取る時刻を設定するコマンド (本人にだけ見える)
+@tree.command(name="contest_dm", description="ABCが始まる何分前にDMで知らせてほしいかを設定します (何も選ばないと今の設定を表示)")
+@app_commands.describe(minutes="開始の何分前に知らせるか", enabled="オンにするか (省略するとオン)")
+@app_commands.choices(minutes=[app_commands.Choice(name=f"{m}分前", value=m) for m in MINUTE_CHOICES])
+async def contest_dm(interaction: discord.Interaction, minutes: app_commands.Choice[int] = None, enabled: bool = True):
+  await interaction.response.defer(ephemeral=True)
+  try:
+    name = get_registered_by_discord_id(interaction.user.id, DB_FILE)
+    if name is None:
+      await interaction.edit_original_response(content="⚠️ 自分のアカウントを登録している人だけが使えます。`/user_register` で登録してください")
+      return
+    note = ""
+    if minutes is not None:
+      set_contest_dm(interaction.user.id, minutes.value, enabled, DB_FILE)
+      if enabled:
+        ok = await send_dm(interaction.user.id, f"✅ ABC が始まる{minutes.value}分前に、ここへお知らせします ({name})")
+        note = "" if ok else "\n⚠️ DM を送れませんでした。サーバーのプライバシー設定で「ダイレクトメッセージ」を許可してください"
+    current = get_contest_dm(interaction.user.id, DB_FILE)
+    status = "、".join(f"{m}分前" for m in current) if current else "なし"
+    head = f"{minutes.name}: {'オン' if enabled else 'オフ'}にしました\n" if minutes is not None else ""
+    await interaction.edit_original_response(content=f"{head}ABC 開始前の DM ({name}): **{status}**{note}")
+  except Exception as e:
+    await report_command_error(interaction, "contest_dm", e)
 
 
 ## @brief 登録済みの AtCoder アカウントを Discord ユーザーに紐づける管理者用コマンド
