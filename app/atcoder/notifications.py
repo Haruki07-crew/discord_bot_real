@@ -22,6 +22,8 @@ def init_engagement_tables(db_file):
         PRIMARY KEY (atcoder_name, badge)
       )
     """)
+  from atcoder.contest_dm import init_contest_dm_tables
+  init_contest_dm_tables(db_file)
 
 
 def set_notification(discord_id, atcoder_name, kind, enabled, db_file):

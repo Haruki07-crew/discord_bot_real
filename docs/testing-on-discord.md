@@ -43,6 +43,7 @@ python main.py
 - [ ] `/notify` でオンにすると DM が届く (22時の連続ACリマインド、月曜9時の週次ふり返り)
 - [ ] `/bulk_register` した人に `/user_link` を実行すると、本人が `/notify` を使えるようになる
 - [ ] ABC の30分前と10分前にリマインドが出る (それぞれ1回だけ)
+- [ ] `/contest_dm minutes:15` で確認の DM が届き、ABC の15分前に DM が1回だけ届く。`/contest_dm` で設定が表示される
 - [ ] 実績は、過去の分がまとめて投稿されず、新しく達成したときだけ投稿される
 - [ ] `/everyone_state`、`/user_list`、`/abc_ranking 483` が表示される
 - [ ] `/bot_status` は管理者だけに見え、管理者以外には断りのメッセージが出る
