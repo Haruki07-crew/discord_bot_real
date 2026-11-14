@@ -752,6 +752,25 @@ class TestEngagement(Base):
     self.run_async(self.ns["abc_reminder_task"].coro())
     self.assertEqual(len(self.rec.sent), 1)  # 30分より前は送らない
 
+  def test_remind_30_and_10_minutes_before(self):
+    from atcoder.contest_reminder import due_reminders, mark_reminded
+    start = 1_000_000
+    contests = [{"id": "abc500", "title": "ABC 500", "start": start}]
+    def due(minutes_left):
+      found = due_reminders(contests, self.db, now=start - minutes_left * 60)
+      for contest, minutes in found:
+        mark_reminded(contest["id"], minutes, self.db)
+      return [m for _c, m in found]
+    self.assertEqual(due(40), [])
+    self.assertEqual(due(29), [30])
+    self.assertEqual(due(20), [])   # 30分前の分は送信済み
+    self.assertEqual(due(9), [10])
+    self.assertEqual(due(5), [])    # 10分前の分も送信済み
+    # 開始8分前に起動した場合は、10分前の分だけ送る (30分前の分をまとめて送らない)
+    contests[0]["id"] = "abc501"
+    self.assertEqual(due(8), [10])
+    self.assertEqual(due(7), [])
+
   def test_achievements_backfill_silently_then_post_once(self):
     add_ac(self.db, "alice", 1, "abc1_b", today_start().timestamp() - 5)
     self.run_async(self.ns["achievements_task"].coro())

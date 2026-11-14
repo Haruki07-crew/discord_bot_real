@@ -758,7 +758,7 @@ async def before_auto_abc_ranking():
 
 
 ## ---- 定期処理 (リマインド・実績・ふり返り) ----
-## @brief ABC 開始の30分前にチャンネルへ知らせる
+## @brief ABC 開始の30分前と10分前にチャンネルへ知らせる
 @tasks.loop(minutes=1)
 async def abc_reminder_task():
   try:
@@ -767,10 +767,11 @@ async def abc_reminder_task():
     channel = client.get_channel(ranking_channel_id)
     if channel is None:
       return
-    for contest in due_reminders(await get_upcoming_abc(), DB_FILE):
+    for contest, minutes in due_reminders(await get_upcoming_abc(), DB_FILE):
       start = datetime.datetime.fromtimestamp(contest["start"], JST).strftime("%H:%M")
-      await channel.send(f"⏰ まもなく **{contest['title']}** が始まります ({start} 開始)\nhttps://atcoder.jp/contests/{contest['id']}")
-      mark_reminded(contest["id"], DB_FILE)
+      head = f"⏰ まもなく **{contest['title']}** が始まります" if minutes >= 30 else f"🔔 あと{minutes}分で **{contest['title']}** が始まります！"
+      await channel.send(f"{head} ({start} 開始)\nhttps://atcoder.jp/contests/{contest['id']}")
+      mark_reminded(contest["id"], minutes, DB_FILE)
   except Exception as e:
     summary = alerts.record_error("abc_reminder_task", e)
     await alerts.notify_admin("abc_reminder_task", f"ABCリマインドで例外\n{summary}", cooldown=6 * 60 * 60)
