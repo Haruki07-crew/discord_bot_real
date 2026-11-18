@@ -1,7 +1,7 @@
 """管理者への通知と、直近のエラーの記録。
 
 - notify_admin: 管理者 (ADMIN_ID) に DM を送る。同じ key の通知は cooldown 秒の間に1回だけ (障害時に DM が大量に届かないように)。
-- record_error: 直近のエラーを保存し、/bot_status で見られるようにする。
+- record_error: 直近のエラーを保存し、/admin status で見られるようにする。
 """
 import time
 import traceback

@@ -123,7 +123,7 @@ docker compose up -d --build     # 初回はビルドに 5〜10 分かかる
 docker compose logs -f           # "activate the bot  now!!!!" が出れば成功 (Ctrl+C で抜ける)
 ```
 
-Discord で `/syozin` などが動くことを確認します。
+Discord で `/syozin record` などが動くことを確認します。
 
 ### 6. 自動更新を設定する
 

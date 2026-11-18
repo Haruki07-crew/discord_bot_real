@@ -1,4 +1,4 @@
-"""ABC 開始前の個人 DM (/contest_dm)。何分前に受け取るかを人ごとに保存し、送信済みを記録する。
+"""ABC 開始前の個人 DM (/notify contest)。何分前に受け取るかを人ごとに保存し、送信済みを記録する。
 コンテストの予定は contest_reminder.get_upcoming_abc をそのまま使うので、人数が増えても外部APIへのアクセスは増えない。"""
 import time
 
@@ -46,7 +46,7 @@ def get_contest_dm(discord_id, db_file):
 
 def due_contest_dms(contests, db_file, now=None):
   """いま送るべきで、まだ送っていない DM を [(discord_id, atcoder_name, コンテスト, 何分前), ...] で返す。
-  自分で登録した (または /user_link で紐づけられた) 人だけが対象。
+  自分で登録した (または /admin link で紐づけられた) 人だけが対象。
   1人につき、残り時間に合う一番短い区切りだけを返す (60分前に設定した直後が開始20分前なら、30分前の分だけ送る)。"""
   now = time.time() if now is None else now
   upcoming = [c for c in contests if 0 < c["start"] - now <= max(MINUTE_CHOICES) * 60]

@@ -18,7 +18,7 @@ async def refresh_users_data(atcoder_names, db_file, interval=0.0, force_contest
   for i, atcoder_name in enumerate(atcoder_names):
     if i > 0 and interval > 0:
       await asyncio.sleep(interval)
-    # 更新中に /user_unregister されたユーザーのキャッシュを書き戻さないよう、直前に登録を確認する
+    # 更新中に /user unregister されたユーザーのキャッシュを書き戻さないよう、直前に登録を確認する
     if get_registered_user(atcoder_name, db_file) is None:
       continue
     try:
