@@ -86,7 +86,9 @@ app/
 - `atcoder/notifications.py`: `notification_prefs` / `achievements` テーブル、DM 希望、アカウントの紐づけ
 - `atcoder/achievements.py`: 実績の判定。初回判定のユーザーは過去の分を投稿せず記録する (`_initialized`)。投稿に成功してから記録する
 - `atcoder/contest_reminder.py`: atcoder.jp の予定表を1時間に1回読み、開始30分前と10分前に投稿する (送信済みは `auto_posted_contests` の `reminder:abcNNN` と `reminder10:abcNNN`)
-- `atcoder/contest_dm.py`: `/contest_dm` の個人 DM。希望 (`contest_dm_prefs`) と送信済み (`contest_dm_sent`、30日で削除) を保存し、`abc_reminder_task` から1分ごとに送る。予定表はチャンネル用と共通なので、人数が増えても外部APIへのアクセスは増えない
+- スラッシュコマンドは `main.py` 冒頭の `user_group` / `ranking_group` / `syozin_group` / `notify_group` / `admin_group` に分けて登録する (`/help` はここから一覧を作る)
+- `atcoder/cumulative_ac.py`: `/syozin graph` の累積AC数の推移。数え方は `count_period_ac` と同じで、最後の値が総合AC・新規ACと一致する
+- `atcoder/contest_dm.py`: `/notify contest` の個人 DM。希望 (`contest_dm_prefs`) と送信済み (`contest_dm_sent`、30日で削除) を保存し、`abc_reminder_task` から1分ごとに送る。予定表はチャンネル用と共通なので、人数が増えても外部APIへのアクセスは増えない
 - 定期処理: `abc_reminder_task` (1分) / `achievements_task` (30分) / `streak_reminder_task` (毎日22時) / `weekly_review_task` (月曜9時)
 
 ## 監視
@@ -94,11 +96,11 @@ app/
 - コマンドの例外は `report_command_error()` で記録・管理者に DM・実行者にエラー表示をまとめて行う。新しいコマンドもこれを使う。
 - 自動タスク (週次・ABC・同期) の失敗も `alerts.notify_admin()` で知らせる。同期は連続10回失敗で通知し、成功したら復旧を通知する。
 - `server.py` の `/health` は `bot_health()` を使い、Discord 切断か同期の連続失敗で 503 を返す。compose.yaml の healthcheck が1分ごとに見る。
-- `/bot_status` (管理者のみ、本人にだけ表示) で状態と直近5件のエラーを確認できる。
+- `/admin status` (管理者のみ、本人にだけ表示) で状態と直近5件のエラーを確認できる。
 
 ## スラッシュコマンド一覧
 
-### /syozin
+### /syozin record
 
 指定ユーザーの精進記録を表示する。
 
@@ -110,7 +112,7 @@ app/
 
 登録済みユーザーの場合は、表示前に提出キャッシュを差分更新する。
 
-### /user_register
+### /user register
 
 AtCoderユーザーをBotに登録する。管理者以外は1人1アカウントまで (自分が登録した行が既にあれば拒否)。
 
@@ -121,12 +123,12 @@ AtCoderユーザーをBotに登録する。管理者以外は1人1アカウン�
 
 処理: AtCoder APIでユーザー存在確認 -> DB登録 -> コンテスト履歴・AC提出を全件取得してキャッシュ
 
-### /user_verify
+### /user verify
 
-`REQUIRE_ATCODER_VERIFICATION=true` のとき、`/user_register` (管理者以外) は登録せずに確認コードを発行し、`pending_verifications` に保存する (有効期限1時間)。
-`/user_verify` は `atcoder.jp/users/{name}` の所属欄 (Affiliation / 所属) にコードがあれば登録を完了する。
+`REQUIRE_ATCODER_VERIFICATION=true` のとき、`/user register` (管理者以外) は登録せずに確認コードを発行し、`pending_verifications` に保存する (有効期限1時間)。
+`/user verify` は `atcoder.jp/users/{name}` の所属欄 (Affiliation / 所属) にコードがあれば登録を完了する。
 
-### /user_unregister
+### /user unregister
 
 登録を解除する。登録者本人またはadminのみ実行可能。そのユーザーの提出・コンテスト履歴のキャッシュも削除する。
 
@@ -134,11 +136,11 @@ AtCoderユーザーをBotに登録する。管理者以外は1人1アカウン�
 |---|---|---|
 | atcoder_name | str | AtCoderユーザー名 (オートコンプリート対応) |
 
-### /user_list
+### /user list
 
 登録ユーザーの一覧と最新レートを表示する。レート帯に応じたハート色で装飾する。
 
-### /everyone_state
+### /ranking total
 
 全登録ユーザーの総AC数と連続AC日数を一覧表示する。
 バックグラウンド同期済みのデータを読むだけ (フッターに何分前のデータかを表示)。
@@ -147,7 +149,7 @@ AtCoderユーザーをBotに登録する。管理者以外は1人1アカウン�
 
 ソート: 連続AC日数(降順) -> 総AC数(降順)
 
-### /diligence_growth
+### /ranking ac
 
 指定期間のレート変化とAC数のランキングを表示する。期間は今日を含めた日数 (1日 = 今日の0:00から、1週間 = 6日前の0:00から)。
 
@@ -163,9 +165,9 @@ AtCoderユーザーをBotに登録する。管理者以外は1人1アカウン�
 - 7日以内: 散布図 (横軸: AC数, 縦軸: レート変化)
 - 8日以上: 折れ線グラフ (横軸: AC数, 縦軸: レート)
 
-### /diligence_growth_point
+### /ranking point
 
-/diligence_growth の点数版。横軸がAC数ではなく獲得点数になる。
+/ranking ac の点数版。横軸がAC数ではなく獲得点数になる。
 
 | パラメータ | 型 | 選択肢 |
 |---|---|---|
@@ -173,7 +175,7 @@ AtCoderユーザーをBotに登録する。管理者以外は1人1アカウン�
 
 ソート: レート変化(降順) -> 点数(降順)
 
-### /abc_ranking
+### /ranking abc
 
 指定したABCコンテストの登録ユーザーランキングを表示する。
 
@@ -188,9 +190,9 @@ AtCoderユーザーをBotに登録する。管理者以外は1人1アカウン�
 
 ---
 
-## 一括登録 (/bulk_register)
+## 一括登録 (/admin bulk_register)
 
-管理者が `/bulk_register group:...` を実行すると、`BULK_GROUPS` (main.py の TEST_USERS / OTHER_KOSEN_USERS) をまとめて登録する。
+管理者が `/admin bulk_register group:...` を実行すると、`BULK_GROUPS` (main.py の TEST_USERS / OTHER_KOSEN_USERS) をまとめて登録する。
 以前はメッセージ本文で動かしていたが、Message Content Intent が必要になるためスラッシュコマンドにした。
 Bot は `discord.Intents.default()` で動き、特別な許可が必要な Intents は使わない。
 
@@ -205,7 +207,7 @@ Bot は `discord.Intents.default()` で動き、特別な許可が必要な Inte
 - 提出は5分ごと、コンテスト履歴は24時間ごとが目安。ABC の自動投稿後は、参加者のコンテスト履歴を優先して取り直す (`request_contest_resync`)。
 - 取得に失敗した種類は60秒止める (落ちている API を叩き続けない)。
 - ホストごとに1秒に1回の制限は http_client が守る。1000人なら一巡約17分。
-- コマンドは DB を読むだけ。`/syozin` で登録済みユーザーを指定したときだけ、その1人をその場で更新する。
+- コマンドは DB を読むだけ。`/syozin record` で登録済みユーザーを指定したときだけ、その1人をその場で更新する。
 
 ### daily_update
 
@@ -367,7 +369,7 @@ Bot全体のキーバリューストア。現在は `prev_contest` の管理に�
 ### ユーザー登録時
 
 ```
-/user_register
+/user register
   -> atcoder_user_exists()           ... AtCoderユーザーページでユーザー存在確認
   -> register_user()                 ... usersテーブルにINSERT
   -> initial_fetch_user_data()
@@ -416,10 +418,10 @@ auto_abc_ranking
   -> set_prev_contest()                   ... 投稿成功後にABC番号を更新
 ```
 
-### 精進状況表示 (/everyone_state)
+### 精進状況表示 (/ranking total)
 
 ```
-/everyone_state
+/ranking total
   -> get_user_dict()       ... 全登録ユーザーを取得
   -> get_ac_count()        ... 各ユーザーの総AC数を取得
   -> get_ac_streak()       ... 各ユーザーの連続AC日数を算出

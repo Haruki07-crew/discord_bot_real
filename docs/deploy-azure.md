@@ -218,7 +218,7 @@ Mac で `docker compose down` して Bot を止めてから、`data/` もコピ�
 scp -r data atcoder-azure:~/discord_bot_real/
 ```
 
-引き継がない場合は、起動後に `/bulk_register` などでメンバーを登録し直してください。
+引き継がない場合は、起動後に `/admin bulk_register` などでメンバーを登録し直してください。
 
 ### 起動する
 
@@ -233,7 +233,7 @@ docker compose logs -f           # "activate the bot  now!!!!" が出れば成�
 **確認:**
 
 - `docker compose ps` の STATUS が `Up ... (healthy)` になる。起動から2分ほどは `health: starting` と表示されます。
-- Discord で `/syozin` と `/bot_status` が動く。
+- Discord で `/syozin record` と `/admin status` が動く。
 
 ---
 

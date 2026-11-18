@@ -22,10 +22,19 @@ import atcoder.background_sync as sync_module
 # 特別な許可が必要な Intents (メッセージ本文・メンバー・プレゼンス) は使わない。
 # スラッシュコマンドだけで動くので不要で、Bot が100サーバーを超えたときの審査も不要になる。
 intents = discord.Intents.default()
-# discord_name は /user_register で自由入力されるため、"@everyone" などを入れると返信で全員に通知が飛ぶ。
+# discord_name は /user register で自由入力されるため、"@everyone" などを入れると返信で全員に通知が飛ぶ。
 # @everyone/@here とロールへのメンションは無効にする (admin への <@id> メンションは残す)
 client = discord.Client(intents=intents, allowed_mentions=discord.AllowedMentions(everyone=False, roles=False, users=True))
 tree = app_commands.CommandTree(client)
+
+# コマンドは目的ごとにグループに分ける (/user register のように2段階で選ぶ)。数が増えても一覧が長くならないように
+user_group = app_commands.Group(name="user", description="AtCoderアカウントの登録・解除・一覧")
+ranking_group = app_commands.Group(name="ranking", description="登録メンバーのランキング")
+syozin_group = app_commands.Group(name="syozin", description="1人ずつの精進記録・グラフ・おすすめ問題・比較")
+notify_group = app_commands.Group(name="notify", description="DMで届くお知らせの設定")
+admin_group = app_commands.Group(name="admin", description="(管理者用) Botの管理")
+for _group in (user_group, ranking_group, syozin_group, notify_group, admin_group):
+  tree.add_command(_group)
 
 admin_id = config.ADMIN_ID
 ranking_channel_id = int(config.RANKING_CHANNEL_ID) if config.RANKING_CHANNEL_ID else None
@@ -61,7 +70,7 @@ def build_embeds(title, color, timestamp, fields, description=None, footer=None)
   cur_len = 0
   title = _truncate(title, FIELD_NAME_MAX - 6)  # "(続き)" を付けても256文字以内
   for name, value in fields:
-    # discord_name は /user_register で自由入力されるため、長すぎる名前で送信が失敗しないよう切り詰める
+    # discord_name は /user register で自由入力されるため、長すぎる名前で送信が失敗しないよう切り詰める
     name = _truncate(name, FIELD_NAME_MAX)
     value = _truncate(value, FIELD_VALUE_MAX)
     field_len = len(name) + len(value)
@@ -745,7 +754,7 @@ async def _auto_abc_ranking():
         await channel.send(content="📄 全員の順位", file=ranking_text_file(abc_title, abc_fields, f"{contest_id}.txt"))
     except Exception as e:
       alerts.record_error("auto_abc_ranking (続き・添付)", e)
-    # レートが確定したので、参加者のコンテスト履歴を次の同期で優先して取り直す (/diligence_growth に反映するため)
+    # レートが確定したので、参加者のコンテスト履歴を次の同期で優先して取り直す (/ranking ac に反映するため)
     request_contest_resync([d["atcoder_name"] for d in rated + unrated], DB_FILE)
 
   except Exception as e:
@@ -758,7 +767,7 @@ async def before_auto_abc_ranking():
 
 
 ## ---- 定期処理 (リマインド・実績・ふり返り) ----
-## @brief ABC 開始の30分前と10分前にチャンネルへ、/contest_dm で決めた時刻に本人へ DM で知らせる
+## @brief ABC 開始の30分前と10分前にチャンネルへ、/notify contest で決めた時刻に本人へ DM で知らせる
 @tasks.loop(minutes=1)
 async def abc_reminder_task():
   try:
@@ -776,7 +785,7 @@ async def abc_reminder_task():
     await alerts.notify_admin("abc_reminder_task", f"ABCリマインドで例外\n{summary}", cooldown=6 * 60 * 60)
 
 
-## @brief /contest_dm で希望した人に、ABC 開始前の DM を送る
+## @brief /notify contest で希望した人に、ABC 開始前の DM を送る
 async def send_contest_dms(contests):
   for discord_id, atcoder_name, contest, minutes in due_contest_dms(contests, DB_FILE):
     start = datetime.datetime.fromtimestamp(contest["start"], JST).strftime("%H:%M")
@@ -967,7 +976,7 @@ BULK_GROUPS = {"test": TEST_USERS, "other_kosen": OTHER_KOSEN_USERS}
 ## @brief 事前に定義したメンバーをまとめて登録する管理者用コマンド
 ## @details 以前はメッセージ本文 (「テスト用にユーザー登録」など) で動かしていたが、
 ##          本文を読むには特別な権限 (Message Content Intent) が必要になるため、スラッシュコマンドにした。
-@tree.command(name="bulk_register", description="(管理者用) main.py に定義したメンバーをまとめて登録します")
+@admin_group.command(name="bulk_register", description="(管理者用) main.py に定義したメンバーをまとめて登録します")
 @app_commands.choices(group=[
   app_commands.Choice(name="テスト用 (TEST_USERS)", value="test"),
   app_commands.Choice(name="他高専テスト用 (OTHER_KOSEN_USERS)", value="other_kosen"),
@@ -995,7 +1004,7 @@ async def bulk_register(interaction: discord.Interaction, group: app_commands.Ch
         done += 1
         await progress_message(interaction, f"✅ {atcoder_name}({discord_name}) を登録しました ({done}/{total})")
       except Exception as e:
-        alerts.record_error("/bulk_register", e)
+        alerts.record_error("/admin bulk_register", e)
         await progress_message(interaction, f"⚠️ {atcoder_name} の登録に失敗: {type(e).__name__}")
     await progress_message(interaction, "✅ ユーザー登録がすべて完了しました！")
 
@@ -1004,7 +1013,7 @@ async def bulk_register(interaction: discord.Interaction, group: app_commands.Ch
 ## @details 今日および通算のAC数・獲得点数を表示する
 ## @param interaction Discordのインタラクション
 ## @param atcoder_name 対象のAtCoderユーザー名
-@tree.command(name = "syozin", description="Atcoderの精進記録を返します")
+@syozin_group.command(name="record", description="Atcoderの精進記録を返します")
 async def rating_command(interaction: discord.Interaction, atcoder_name: str):
   await interaction.response.defer()
   try:
@@ -1044,7 +1053,7 @@ async def rating_command(interaction: discord.Interaction, atcoder_name: str):
       embed.set_footer(text = "偉すぎるぜbro\n")
     await interaction.edit_original_response(embed = embed)
   except Exception as e:
-    await report_command_error(interaction, "syozin", e)
+    await report_command_error(interaction, "syozin record", e)
 
 
 ## @brief 登録できるか確認する。できなければ理由のメッセージ、できれば None を返す (await を含まない)
@@ -1053,14 +1062,14 @@ def registration_problem(interaction, atcoder_name):
     mine = get_registered_by_discord_id(interaction.user.id, DB_FILE)
     if mine:
       return (f"⚠️エラー : すでに {mine} を登録しています。登録できるのは1人1アカウントです。"
-              f"変更するときは `/user_unregister` で解除してから登録し直してください")
+              f"変更するときは `/user unregister` で解除してから登録し直してください")
   exist_user = get_registered_user(atcoder_name, DB_FILE)
   if exist_user:
     return f"⚠️エラー: {atcoder_name} さんはすでに<@{exist_user[1]}>さんによって登録されています"
   return None
 
 
-## @brief 登録を確定して提出履歴を取り込む (/user_register と /user_verify の共通処理)
+## @brief 登録を確定して提出履歴を取り込む (/user register と /user verify の共通処理)
 async def complete_registration(interaction, atcoder_name, discord_name):
   # 直前に確認し直す。ここから INSERT までは await を挟まないので、同時に実行されても二重登録にならない
   problem = registration_problem(interaction, atcoder_name)
@@ -1079,10 +1088,10 @@ async def complete_registration(interaction, atcoder_name, discord_name):
 
 ## @brief ユーザーをDBに登録するコマンド
 ## @details AtCoderの存在確認後にDBへ登録する。管理者以外は1人1アカウントまで。
-##          REQUIRE_ATCODER_VERIFICATION が有効なら、管理者以外は確認コードを発行して /user_verify を待つ。
+##          REQUIRE_ATCODER_VERIFICATION が有効なら、管理者以外は確認コードを発行して /user verify を待つ。
 ## @param atcoder_name 登録するAtCoderユーザー名
 ## @param discord_name ランキングに表示する名前 (省略時は Discord の表示名)
-@tree.command(name = "user_register", description="自分のAtCoderアカウントを登録します")
+@user_group.command(name="register", description="自分のAtCoderアカウントを登録します")
 @app_commands.describe(atcoder_name="AtCoderのユーザー名", discord_name="ランキングに表示する名前 (省略するとDiscordの表示名)")
 async def user_register(interaction: discord.Interaction, atcoder_name: str, discord_name: str = None):
   await interaction.response.defer()
@@ -1109,24 +1118,24 @@ async def user_register(interaction: discord.Interaction, atcoder_name: str, dis
       await interaction.followup.send(
         f"🔐 **{atcoder_name}** があなたのアカウントか確認します。\n"
         f"1. AtCoder の [ユーザー情報の変更](https://atcoder.jp/settings) を開き、**所属** に `{code}` を書いて保存する\n"
-        f"2. 1時間以内に `/user_verify` を実行する\n"
+        f"2. 1時間以内に `/user verify` を実行する\n"
         f"確認が終わったら、所属は元に戻して大丈夫です。"
       )
       return
 
     await complete_registration(interaction, atcoder_name, discord_name)
   except Exception as e:
-    await report_command_error(interaction, "user_register", e, use_followup=True)
+    await report_command_error(interaction, "user register", e, use_followup=True)
 
 
-## @brief /user_register で発行した確認コードが AtCoder の所属欄にあるか確かめ、登録を完了するコマンド
-@tree.command(name="user_verify", description="AtCoderの所属欄に書いた確認コードを確かめて、登録を完了します")
+## @brief /user register で発行した確認コードが AtCoder の所属欄にあるか確かめ、登録を完了するコマンド
+@user_group.command(name="verify", description="AtCoderの所属欄に書いた確認コードを確かめて、登録を完了します")
 async def user_verify(interaction: discord.Interaction):
   await interaction.response.defer()
   try:
     pending = get_pending_verification(interaction.user.id, DB_FILE)
     if pending is None:
-      await interaction.followup.send("確認待ちの登録がありません (有効期限は1時間です)。`/user_register` からやり直してください")
+      await interaction.followup.send("確認待ちの登録がありません (有効期限は1時間です)。`/user register` からやり直してください")
       return
     atcoder_name, discord_name, code = pending
     found = await affiliation_contains(atcoder_name, code)
@@ -1135,13 +1144,13 @@ async def user_verify(interaction: discord.Interaction):
       return
     if not found:
       await interaction.followup.send(
-        f"⚠️ {atcoder_name} の所属欄に `{code}` が見つかりませんでした。保存したか確認して、もう一度 `/user_verify` を実行してください"
+        f"⚠️ {atcoder_name} の所属欄に `{code}` が見つかりませんでした。保存したか確認して、もう一度 `/user verify` を実行してください"
       )
       return
     delete_pending_verification(interaction.user.id, DB_FILE)
     await complete_registration(interaction, atcoder_name, discord_name)
   except Exception as e:
-    await report_command_error(interaction, "user_verify", e, use_followup=True)
+    await report_command_error(interaction, "user verify", e, use_followup=True)
 
 
 ## @brief user_unregister の atcoder_name オートコンプリート (登録済みユーザー一覧)
@@ -1158,7 +1167,7 @@ async def registered_atcoder_autocomplete(interaction: discord.Interaction, curr
 ## @details 登録者本人またはadminのみ解除可能
 ## @param interaction Discordのインタラクション
 ## @param atcoder_name 登録解除するAtCoderユーザー名
-@tree.command(name = "user_unregister", description="登録されているユーザーの登録を解除します")
+@user_group.command(name="unregister", description="登録されているユーザーの登録を解除します")
 @app_commands.autocomplete(atcoder_name=registered_atcoder_autocomplete)
 async def user_unregister(interaction: discord.Interaction, atcoder_name: str):
   await interaction.response.defer()
@@ -1176,7 +1185,7 @@ async def user_unregister(interaction: discord.Interaction, atcoder_name: str):
 
 ## @brief 登録済みユーザーの一覧とレートをEmbedで表示するコマンド
 ## @param interaction Discordのインタラクション
-@tree.command(name = "user_list", description="登録済みユーザーおよびレートを表示します")
+@user_group.command(name="list", description="登録済みユーザーおよびレートを表示します")
 async def user_list(interaction: discord.Interaction):
   await interaction.response.defer()
   try:
@@ -1196,14 +1205,14 @@ async def user_list(interaction: discord.Interaction):
     pages = build_pages(f"登録ユーザー ({len(fields)}人)", 0x3498db, interaction.created_at, fields)
     await send_pages_to_interaction(interaction, pages)
   except Exception as e:
-    await report_command_error(interaction, "user_list", e)
+    await report_command_error(interaction, "user list", e)
 
 
 ## @brief レート変化を主軸にしたランキングを表示するコマンド
 ## @details 第1キー: レート変化(降順)、第2キー: AC数(降順) でランキングを生成する
 ## @param interaction Discordのインタラクション
 ## @param period 比較期間
-@tree.command(name="diligence_growth", description="レート変化とAC数のランキングを表示します")
+@ranking_group.command(name="ac", description="レート変化とAC数のランキングを表示します")
 @app_commands.choices(period=[
   app_commands.Choice(name = "1日",  value = 1),
   app_commands.Choice(name = "1週間", value = 7),
@@ -1242,14 +1251,14 @@ async def diligence_growth(interaction: discord.Interaction, period: app_command
     file = discord.File(graph_buf, filename="ac_rate.png") if graph_buf is not None else None
     await send_pages_to_interaction(interaction, pages, file, "ac_rate.png")
   except Exception as e:
-    await report_command_error(interaction, "diligence_growth", e)
+    await report_command_error(interaction, "ranking ac", e)
 
 
 ## @brief 点数を主軸にしたランキングを表示するコマンド (diligence_growthの点数版)
 ## @details 第1キー: レート変化(降順)、第2キー: 点数(降順) でランキングを生成する
 ## @param interaction Discordのインタラクション
 ## @param period 比較期間
-@tree.command(name="diligence_growth_point", description="レート変化と点数のランキングを表示します")
+@ranking_group.command(name="point", description="レート変化と点数のランキングを表示します")
 @app_commands.choices(period=[
   app_commands.Choice(name = "1日",  value = 1),
   app_commands.Choice(name = "1週間", value = 7),
@@ -1309,12 +1318,12 @@ async def diligence_growth_point(interaction: discord.Interaction, period: app_c
     file = discord.File(graph_buf, filename="point_rate.png") if graph_buf is not None else None
     await send_pages_to_interaction(interaction, pages, file, "point_rate.png")
   except Exception as e:
-    await report_command_error(interaction, "diligence_growth_point", e)
+    await report_command_error(interaction, "ranking point", e)
 
 
 ## @brief 全登録ユーザーの現在のAC数と連続AC日数を表示するコマンド
 ## @param interaction Discordのインタラクション
-@tree.command(name="everyone_state", description="全員の総AC数と連続AC日数を表示します")
+@ranking_group.command(name="total", description="全員の総AC数と連続AC日数を表示します")
 async def everyone_state(interaction: discord.Interaction):
   await interaction.response.defer()
   try:
@@ -1342,7 +1351,7 @@ async def everyone_state(interaction: discord.Interaction):
     pages = build_pages(f"全員の精進状況 ({len(fields)}人)", 0x3498db, interaction.created_at, fields, footer=sync_footer())
     await send_pages_to_interaction(interaction, pages)
   except Exception as e:
-    await report_command_error(interaction, "everyone_state", e)
+    await report_command_error(interaction, "ranking total", e)
 
 
 ## @brief 指定したABCコンテストの登録ユーザーランキングを表示するコマンド
@@ -1350,7 +1359,7 @@ async def everyone_state(interaction: discord.Interaction):
 ##          0問の場合は参加なしとみなし除外する。unrated参加者はランキング外に別途表示する。
 ## @param interaction Discordのインタラクション
 ## @param contest_number ABCのコンテスト番号 (例: 400)
-@tree.command(name="abc_ranking", description="指定したABCコンテストの登録ユーザーランキングを表示します (例: 400)")
+@ranking_group.command(name="abc", description="指定したABCコンテストの登録ユーザーランキングを表示します (例: 400)")
 async def abc_ranking(interaction: discord.Interaction, contest_number: int):
   await interaction.response.defer()
   try:
@@ -1379,7 +1388,7 @@ async def abc_ranking(interaction: discord.Interaction, contest_number: int):
 
 
 ## @brief レートに合った未ACの問題を3問おすすめするコマンド
-@tree.command(name="recommend", description="レートに合った、まだ解いていない問題をおすすめします")
+@syozin_group.command(name="recommend", description="レートに合った、まだ解いていない問題をおすすめします")
 @app_commands.describe(atcoder_name="対象のAtCoder名 (省略すると自分)")
 @app_commands.autocomplete(atcoder_name=registered_atcoder_autocomplete)
 async def recommend(interaction: discord.Interaction, atcoder_name: str = None):
@@ -1387,7 +1396,7 @@ async def recommend(interaction: discord.Interaction, atcoder_name: str = None):
   try:
     name = registered_name(atcoder_name) if atcoder_name else get_registered_by_discord_id(interaction.user.id, DB_FILE)
     if name is None:
-      await interaction.edit_original_response(content="⚠️ 登録済みのユーザーだけが使えます。`/user_register` で登録してください")
+      await interaction.edit_original_response(content="⚠️ 登録済みのユーザーだけが使えます。`/user register` で登録してください")
       return
     models, problems = await get_problem_data()
     rating = get_latest_rating_from_db(name, DB_FILE)
@@ -1398,11 +1407,11 @@ async def recommend(interaction: discord.Interaction, atcoder_name: str = None):
     fields = [(f"{label} (diff {difficulty} / {color_name(difficulty)})", problem_link(problem_id, problems)) for label, problem_id, difficulty in picks]
     await send_pages_to_interaction(interaction, build_pages(f"🎯 {name} さんへのおすすめ (レート {rating})", 0x1ABC9C, interaction.created_at, fields))
   except Exception as e:
-    await report_command_error(interaction, "recommend", e)
+    await report_command_error(interaction, "syozin recommend", e)
 
 
 ## @brief DM 通知のオン・オフを切り替えるコマンド (本人にだけ見える)
-@tree.command(name="notify", description="連続ACのリマインドや週次ふり返りのDMをオン・オフします")
+@notify_group.command(name="set", description="連続ACのリマインドや週次ふり返りのDMをオン・オフします")
 @app_commands.choices(kind=[
   app_commands.Choice(name="連続ACが途切れそうなとき (毎日22時)", value="streak"),
   app_commands.Choice(name="週次ふり返り (毎週月曜9時)", value="weekly_review"),
@@ -1412,17 +1421,17 @@ async def notify(interaction: discord.Interaction, kind: app_commands.Choice[str
   try:
     name = get_registered_by_discord_id(interaction.user.id, DB_FILE)
     if name is None:
-      await interaction.edit_original_response(content="⚠️ 自分のアカウントを登録している人だけが使えます。`/user_register` で登録してください")
+      await interaction.edit_original_response(content="⚠️ 自分のアカウントを登録している人だけが使えます。`/user register` で登録してください")
       return
     set_notification(interaction.user.id, name, kind.value, enabled, DB_FILE)
     extra = "\nDMを受け取れるよう、このサーバーのプライバシー設定で「ダイレクトメッセージ」を許可してください" if enabled else ""
     await interaction.edit_original_response(content=f"{kind.name}: {'オン' if enabled else 'オフ'}にしました ({name}){extra}")
   except Exception as e:
-    await report_command_error(interaction, "notify", e)
+    await report_command_error(interaction, "notify set", e)
 
 
 ## @brief ABC 開始前の DM を受け取る時刻を設定するコマンド (本人にだけ見える)
-@tree.command(name="contest_dm", description="ABCが始まる何分前にDMで知らせてほしいかを設定します (何も選ばないと今の設定を表示)")
+@notify_group.command(name="contest", description="ABCが始まる何分前にDMで知らせてほしいかを設定します (何も選ばないと今の設定を表示)")
 @app_commands.describe(minutes="開始の何分前に知らせるか", enabled="オンにするか (省略するとオン)")
 @app_commands.choices(minutes=[app_commands.Choice(name=f"{m}分前", value=m) for m in MINUTE_CHOICES])
 async def contest_dm(interaction: discord.Interaction, minutes: app_commands.Choice[int] = None, enabled: bool = True):
@@ -1430,7 +1439,7 @@ async def contest_dm(interaction: discord.Interaction, minutes: app_commands.Cho
   try:
     name = get_registered_by_discord_id(interaction.user.id, DB_FILE)
     if name is None:
-      await interaction.edit_original_response(content="⚠️ 自分のアカウントを登録している人だけが使えます。`/user_register` で登録してください")
+      await interaction.edit_original_response(content="⚠️ 自分のアカウントを登録している人だけが使えます。`/user register` で登録してください")
       return
     note = ""
     if minutes is not None:
@@ -1443,12 +1452,12 @@ async def contest_dm(interaction: discord.Interaction, minutes: app_commands.Cho
     head = f"{minutes.name}: {'オン' if enabled else 'オフ'}にしました\n" if minutes is not None else ""
     await interaction.edit_original_response(content=f"{head}ABC 開始前の DM ({name}): **{status}**{note}")
   except Exception as e:
-    await report_command_error(interaction, "contest_dm", e)
+    await report_command_error(interaction, "notify contest", e)
 
 
 ## @brief 登録済みの AtCoder アカウントを Discord ユーザーに紐づける管理者用コマンド
-## @details /bulk_register で登録した人は管理者の ID で登録されているため、本人の順位表示や通知が使えない
-@tree.command(name="user_link", description="(管理者用) 登録済みのAtCoderアカウントをDiscordユーザーに紐づけます")
+## @details /admin bulk_register で登録した人は管理者の ID で登録されているため、本人の順位表示や通知が使えない
+@admin_group.command(name="link", description="(管理者用) 登録済みのAtCoderアカウントをDiscordユーザーに紐づけます")
 @app_commands.autocomplete(atcoder_name=registered_atcoder_autocomplete)
 async def user_link(interaction: discord.Interaction, atcoder_name: str, member: discord.User):
   await interaction.response.defer(ephemeral=True)
@@ -1461,11 +1470,11 @@ async def user_link(interaction: discord.Interaction, atcoder_name: str, member:
       content=f"{atcoder_name} を {member} に紐づけました" if done else f"{atcoder_name} さんは登録されていません"
     )
   except Exception as e:
-    await report_command_error(interaction, "user_link", e)
+    await report_command_error(interaction, "admin link", e)
 
 
 ## @brief 難易度で重み付けした精進スコアのランキングを表示するコマンド
-@tree.command(name="diligence_score", description="難易度で重み付けした精進スコアのランキングを表示します")
+@ranking_group.command(name="score", description="難易度で重み付けした精進スコアのランキングを表示します")
 @app_commands.choices(period=PERIOD_CHOICES, color=COLOR_CHOICES)
 async def diligence_score(interaction: discord.Interaction, period: app_commands.Choice[int], color: app_commands.Choice[str] = None):
   await interaction.response.defer()
@@ -1495,11 +1504,11 @@ async def diligence_score(interaction: discord.Interaction, period: app_commands
                         description=f"{mine}\n{description}" if mine else description, footer=sync_footer())
     await send_pages_to_interaction(interaction, pages)
   except Exception as e:
-    await report_command_error(interaction, "diligence_score", e)
+    await report_command_error(interaction, "ranking score", e)
 
 
 ## @brief 2人の精進を比べるコマンド
-@tree.command(name="versus", description="登録ユーザーと自分の精進を比べます")
+@syozin_group.command(name="versus", description="登録ユーザーと自分の精進を比べます")
 @app_commands.describe(opponent="比べる相手のAtCoder名", me="自分のAtCoder名 (省略すると自分のアカウント)")
 @app_commands.autocomplete(opponent=registered_atcoder_autocomplete, me=registered_atcoder_autocomplete)
 async def versus(interaction: discord.Interaction, opponent: str, me: str = None):
@@ -1526,7 +1535,79 @@ async def versus(interaction: discord.Interaction, opponent: str, me: str = None
     fields.append((f"{mine} だけが解いた問題", f"**{len(my_solved - other_solved)}** 問"))
     await send_pages_to_interaction(interaction, build_pages(f"⚔️ {mine} vs {other}", 0xE74C3C, interaction.created_at, fields, footer=sync_footer()))
   except Exception as e:
-    await report_command_error(interaction, "versus", e)
+    await report_command_error(interaction, "syozin versus", e)
+
+
+## @brief 期間内の累積AC数の推移をグラフで表示するコマンド (横軸: 時刻、縦軸: 累積AC数)
+@syozin_group.command(name="graph", description="期間内の累積AC数の推移をグラフで表示します (省略すると上位10人と自分)")
+@app_commands.describe(period="期間", kind="数え方 (省略すると総合AC)", atcoder_name="この人だけを描く (省略すると上位10人と自分)")
+@app_commands.choices(period=PERIOD_CHOICES, kind=[
+  app_commands.Choice(name="総合AC (別の日の解き直しも数える)", value="total"),
+  app_commands.Choice(name="新規AC (初めて解いた問題だけ)", value="new"),
+])
+@app_commands.autocomplete(atcoder_name=registered_atcoder_autocomplete)
+async def cumulative_graph(interaction: discord.Interaction, period: app_commands.Choice[int],
+                           kind: app_commands.Choice[str] = None, atcoder_name: str = None):
+  await interaction.response.defer()
+  try:
+    kind_value = kind.value if kind else "total"
+    kind_label = "新規AC" if kind_value == "new" else "総合AC"
+    user = get_user_dict(DB_FILE)
+    if atcoder_name:
+      name = registered_name(atcoder_name)
+      if name is None:
+        await interaction.edit_original_response(content=f"⚠️ {atcoder_name} さんは登録されていません")
+        return
+      user = {name: user[name]}
+    if not user:
+      await interaction.edit_original_response(content="登録されているユーザーがいません")
+      return
+    # 全員分を DB から読むので、イベントループを止めないよう別スレッドで行う
+    series = await asyncio.to_thread(
+      lambda: {name: get_cumulative_ac_series(name, period.value, DB_FILE, kind_value) for name in user}
+    )
+    rows = sorted(((len(s), name) for name, s in series.items()), reverse=True)
+    ranking, fields = [], []
+    place, previous = 0, None
+    for i, (count, name) in enumerate(rows):
+      if count != previous:
+        place, previous = i + 1, count
+      ranking.append({"atcoder_name": name, "place": place})
+      fields.append((f"{place}位 : {name}({user[name]})", f"{kind_label} : **{count}**"))
+    targets = graph_targets(interaction, ranking)
+    title = f"累積{kind_label}の推移 [{period.name}]"
+    graph_buf = await render_graph(create_cumulative_ac_graph, {n: series[n] for n in targets}, period.value, title)
+    if graph_buf is None:
+      await interaction.edit_original_response(content=f"期間内 ({period.name}) の{kind_label}がありません")
+      return
+    pages = build_pages(f"📈 {title}", 0x3498DB, interaction.created_at, fields,
+                        description=my_rank_text(interaction, ranking, len(ranking)), footer=sync_footer())
+    await send_pages_to_interaction(interaction, pages, discord.File(graph_buf, filename="cumulative_ac.png"), "cumulative_ac.png")
+  except Exception as e:
+    await report_command_error(interaction, "syozin graph", e)
+
+
+## @brief コマンドの一覧を、グループごとに表示する (本人にだけ見える)
+@tree.command(name="help", description="コマンドの一覧と使い方を表示します")
+async def help_command(interaction: discord.Interaction):
+  await interaction.response.defer(ephemeral=True)
+  try:
+    await interaction.edit_original_response(embed=build_help_embed())
+  except Exception as e:
+    await report_command_error(interaction, "help", e)
+
+
+HELP_FIRST_STEPS = "はじめに `/user register` で自分のAtCoderアカウントを登録してください。"
+
+
+## @brief 登録されているコマンドから一覧の Embed を作る (コマンドを足しても一覧の更新を忘れないように)
+def build_help_embed():
+  embed = discord.Embed(title="📖 コマンドの一覧", color=0x95A5A6, description=HELP_FIRST_STEPS)
+  for command in tree.get_commands():
+    if isinstance(command, app_commands.Group):
+      lines = [f"`/{command.name} {sub.name}` {sub.description}" for sub in command.commands]
+      embed.add_field(name=f"/{command.name} — {command.description}", value="\n".join(lines)[:1024], inline=False)
+  return embed
 
 
 ## @brief Slashコマンドのエラーをキャッチしてadminに通知するハンドラ
@@ -1548,7 +1629,7 @@ async def on_app_command_error(interaction: discord.Interaction, error: app_comm
 
 
 ## @brief Bot の状態を表示する管理者用コマンド (本人にだけ見える)
-@tree.command(name="bot_status", description="(管理者用) Botの同期状況と直近のエラーを表示します")
+@admin_group.command(name="status", description="(管理者用) Botの同期状況と直近のエラーを表示します")
 async def bot_status(interaction: discord.Interaction):
   if not is_admin(interaction.user.id):
     await interaction.response.send_message("このコマンドは管理者だけが使えます", ephemeral=True)

@@ -7,9 +7,9 @@ AtCoder の精進(AC数・獲得点数)とレートの変化を自動で集計�
 
 | | 内容 |
 |---|---|
-| 📈 精進の記録 | `/syozin` で今日の総合AC・新規AC・獲得点数と、これまでに解いた問題数を表示 |
-| 🏆 ランキング | `/diligence_growth` で、1日〜1年の期間のレート変化とAC数のランキングとグラフを表示 |
-| 🔥 連続AC | `/everyone_state` で、全員の解いた問題数と何日連続でACしているかを表示 |
+| 📈 精進の記録 | `/syozin record` で今日の総合AC・新規AC・獲得点数と、これまでに解いた問題数を表示 |
+| 🏆 ランキング | `/ranking ac` で、1日〜1年の期間のレート変化とAC数のランキングとグラフを表示 |
+| 🔥 連続AC | `/ranking total` で、全員の解いた問題数と何日連続でACしているかを表示 |
 | 🥇 ABCの結果 | ABC のレートが確定すると、登録メンバーの順位・AC数・パフォーマンスを**自動で投稿** |
 | 📊 週次レポート | 毎週月曜 0:15 に、先週のランキングと12週分の累積グラフを**自動で投稿** |
 
@@ -122,29 +122,41 @@ docker compose logs -f     # "activate the bot  now!!!!" が出れば成功
 
 ### 6. 動作を確認する
 
-1. Discord でサーバーを開き、メッセージ欄に `/` を入力する。`/user_register` などが候補に出れば OK。
+1. Discord でサーバーを開き、メッセージ欄に `/` を入力する。`/user register` などが候補に出れば OK。
    - 出ない場合は、Discord を再読み込み (`Ctrl + R` / Mac は `Cmd + R`) してください。反映までに数分かかることもあります。
-2. `/user_register atcoder_name:自分のAtCoder名` で自分を登録する。
-3. `/syozin atcoder_name:自分のAtCoder名` を実行して、AC数が表示されれば完了です 🎉
+2. `/user register atcoder_name:自分のAtCoder名` で自分を登録する。
+3. `/syozin record atcoder_name:自分のAtCoder名` を実行して、AC数が表示されれば完了です 🎉
 
 ---
 
 ## 使い方
 
+コマンドは目的ごとに5つのグループに分かれています。`/` のあとにグループ名を入れると、その中のコマンドが出てきます。迷ったら **`/help`** で一覧を見られます (自分にだけ表示)。
+
+| グループ | 中身 |
+|---|---|
+| `/user` | 登録 (`register`)・本人確認 (`verify`)・解除 (`unregister`)・一覧 (`list`) |
+| `/ranking` | AC数 (`ac`)・点数 (`point`)・精進スコア (`score`)・ABCの結果 (`abc`)・全員の通算と連続AC (`total`) |
+| `/syozin` | 1人の記録 (`record`)・累積ACのグラフ (`graph`)・おすすめ問題 (`recommend`)・比較 (`versus`) |
+| `/notify` | 連続AC・週次ふり返りの DM (`set`)・ABC 開始前の DM (`contest`) |
+| `/admin` | 管理者用: 状態 (`status`)・紐づけ (`link`)・一括登録 (`bulk_register`) |
+
+> 以前の `/diligence_growth` や `/user_register` などは、この形に名前が変わりました (例: `/diligence_growth` → `/ranking ac`、`/syozin` → `/syozin record`)。
+
 ### メンバーを登録する
 
 | コマンド | 説明 |
 |---|---|
-| `/user_register atcoder_name [discord_name]` | 自分の AtCoder アカウントを登録する。`discord_name` はランキングに表示される名前 (省略すると Discord の表示名) |
-| `/user_verify` | 本人確認が有効なときに使う。所属欄に確認コードを書いたあとに実行すると、登録が完了する |
-| `/user_unregister atcoder_name` | 登録を解除する。登録した本人か管理者だけが実行できる |
-| `/user_list` | 登録メンバーと現在のレートの一覧を表示する |
+| `/user register atcoder_name [discord_name]` | 自分の AtCoder アカウントを登録する。`discord_name` はランキングに表示される名前 (省略すると Discord の表示名) |
+| `/user verify` | 本人確認が有効なときに使う。所属欄に確認コードを書いたあとに実行すると、登録が完了する |
+| `/user unregister atcoder_name` | 登録を解除する。登録した本人か管理者だけが実行できる |
+| `/user list` | 登録メンバーと現在のレートの一覧を表示する |
 
 - `REQUIRE_ATCODER_VERIFICATION=true` のときは、他人のアカウントを登録できないように本人確認をします。
-  1. `/user_register` を実行すると、確認コード (例: `atcbot-1a2b3c4d`) が表示される
+  1. `/user register` を実行すると、確認コード (例: `atcbot-1a2b3c4d`) が表示される
   2. AtCoder の [ユーザー情報の変更](https://atcoder.jp/settings) で **所属** にそのコードを書いて保存する
-  3. 1時間以内に `/user_verify` を実行すると登録が完了する (終わったら所属は元に戻してよい)
-- 登録できるのは **1人1アカウント** です (管理者は何人でも登録できます)。登録し直すときは `/user_unregister` で解除してから登録します。
+  3. 1時間以内に `/user verify` を実行すると登録が完了する (終わったら所属は元に戻してよい)
+- 登録できるのは **1人1アカウント** です (管理者は何人でも登録できます)。登録し直すときは `/user unregister` で解除してから登録します。
 - 登録すると、その人の過去の提出をすべて取り込みます。提出が多い人は数分かかります。
 - AtCoder のユーザー名は、大文字と小文字を区別しません (`Hanaosi` と `hanaosi` は同じ人として扱います)。
 
@@ -152,14 +164,15 @@ docker compose logs -f     # "activate the bot  now!!!!" が出れば成功
 
 | コマンド | 説明 |
 |---|---|
-| `/syozin atcoder_name` | 今日の総合AC・新規AC・獲得点数と、これまでに解いた問題数を表示する。登録していない人でも見られる (新規ACは登録ユーザーのみ) |
-| `/everyone_state` | 全員の解いた問題数と、何日連続でACしているかを表示する (今日の分は含めず、昨日から数える) |
-| `/diligence_growth period` | 期間内のレート変化とAC数のランキングを、グラフ付きで表示する |
-| `/diligence_growth_point period` | `/diligence_growth` の点数版。AC数のかわりに獲得点数で比べる |
-| `/recommend [atcoder_name]` | レートに合った未ACの問題を、易しめ・ちょうどいい・挑戦の3問おすすめする |
-| `/diligence_score period [color]` | 難易度で重み付けした精進スコアのランキング |
-| `/versus opponent [me]` | 登録ユーザーとレート・1週間の精進・相手だけが解いた問題を比べる |
-| `/abc_ranking contest_number` | 指定した ABC (例: `483`) での、登録メンバーの順位・AC数・パフォーマンス・レート変化を表示する |
+| `/syozin record atcoder_name` | 今日の総合AC・新規AC・獲得点数と、これまでに解いた問題数を表示する。登録していない人でも見られる (新規ACは登録ユーザーのみ) |
+| `/ranking total` | 全員の解いた問題数と、何日連続でACしているかを表示する (今日の分は含めず、昨日から数える) |
+| `/ranking ac period` | 期間内のレート変化とAC数のランキングを、グラフ付きで表示する |
+| `/ranking point period` | `/ranking ac` の点数版。AC数のかわりに獲得点数で比べる |
+| `/syozin recommend [atcoder_name]` | レートに合った未ACの問題を、易しめ・ちょうどいい・挑戦の3問おすすめする |
+| `/ranking score period [color]` | 難易度で重み付けした精進スコアのランキング |
+| `/syozin versus opponent [me]` | 登録ユーザーとレート・1週間の精進・相手だけが解いた問題を比べる |
+| `/syozin graph period [kind] [atcoder_name]` | 横軸を時刻、縦軸を累積AC数にしたグラフ。期間内にどのペースで解いたかが分かる。`kind` で総合AC・新規ACを選べる。省略すると上位10人と自分、`atcoder_name` を指定するとその人だけ |
+| `/ranking abc contest_number` | 指定した ABC (例: `483`) での、登録メンバーの順位・AC数・パフォーマンス・レート変化を表示する |
 
 **AC の数え方**
 
@@ -173,20 +186,20 @@ docker compose logs -f     # "activate the bot  now!!!!" が出れば成功
 
 **精進スコア** は、期間内に**初めて解いた問題だけ**を難易度で点数にします (灰10・茶20・緑40・水80・青160・黄320・橙640・赤1280)。解き直しでは増えません。
 
-`/diligence_growth` と `/diligence_growth_point` は、`color` を指定すると同じレート帯の人だけで順位を出します。`/syozin` には、次の色まであといくつかと直近のレート推移も出ます。
+`/ranking ac` と `/ranking point` は、`color` を指定すると同じレート帯の人だけで順位を出します。`/syozin record` には、次の色まであといくつかと直近のレート推移も出ます。
 
 **DM 通知**
 
-`/notify kind enabled` で、次の DM を自分で選んでオン・オフできます。受け取るには、サーバーのプライバシー設定で DM を許可してください。
+`/notify set kind enabled` で、次の DM を自分で選んでオン・オフできます。受け取るには、サーバーのプライバシー設定で DM を許可してください。
 
 - 連続ACのリマインド: 毎日22時に、今日まだACしておらず連続記録が途切れそうなときに届く
 - 週次ふり返り: 毎週月曜9時に、先週の総合AC・新規AC・スコア・レート変化と「次の壁」(ABC で解いた割合が初めて半分を切る問題) が届く
 
-`/contest_dm minutes` で、ABC が始まる何分前に DM で知らせてほしいかを自分で決められます (5・10・15・30・60・120分前から選択。いくつでも設定可)。
+`/notify contest minutes` で、ABC が始まる何分前に DM で知らせてほしいかを自分で決められます (5・10・15・30・60・120分前から選択。いくつでも設定可)。
 
-- `/contest_dm minutes:15` → 15分前に届く。設定したときに確認の DM が届かなければ、DM が許可されていない
-- `/contest_dm minutes:15 enabled:False` → 15分前の分をやめる
-- `/contest_dm` (何も選ばない) → 今の設定を表示する
+- `/notify contest minutes:15` → 15分前に届く。設定したときに確認の DM が届かなければ、DM が許可されていない
+- `/notify contest minutes:15 enabled:False` → 15分前の分をやめる
+- `/notify contest` (何も選ばない) → 今の設定を表示する
 
 **表示のしかた**
 
@@ -195,7 +208,7 @@ docker compose logs -f     # "activate the bot  now!!!!" が出れば成功
 - グラフに描かれるのは、上位10人と実行した本人だけです (全員を描くと線が重なって読めないため)。
 - 自動投稿 (ABC・週次) には上位10人だけを載せます。11人以上いるときは、全員の順位をテキストファイルで添付します。
 
-**`/diligence_growth` の期間** は、今日を含めた日数で数えます。
+**`/ranking ac` の期間** は、今日を含めた日数で数えます。
 
 - `1日`: 今日の 0:00 から今まで
 - `1週間`: 6日前の 0:00 から今まで
@@ -205,7 +218,7 @@ docker compose logs -f     # "activate the bot  now!!!!" が出れば成功
 
 > 💡 データは Bot がバックグラウンドで1人ずつ同期し続けています (提出はおよそ5分ごと)。
 > コマンドは同期済みのデータを読むだけなので、すぐに返事が出ます。何分前のデータかはランキングの一番下に表示されます。
-> `/syozin` で登録済みの人を指定したときは、その人のデータをその場で取り直してから表示します。
+> `/syozin record` で登録済みの人を指定したときは、その人のデータをその場で取り直してから表示します。
 
 ### 自動で投稿されるもの
 
@@ -224,7 +237,7 @@ docker compose logs -f     # "activate the bot  now!!!!" が出れば成功
 
 ### 管理者向け: Bot の状態を見る・異常を知る
 
-- `/bot_status`: 同期の状況 (データが何分前のものか、同期の失敗回数)、直近のエラー、起動してからの時間を表示します。管理者にだけ見えます。
+- `/admin status`: 同期の状況 (データが何分前のものか、同期の失敗回数)、直近のエラー、起動してからの時間を表示します。管理者にだけ見えます。
 - 次のときは、管理者に **DM で自動通知** が届きます (同じ内容は一定時間に1回まで)。
   - コマンドでエラーが起きた
   - ABC・週次の自動投稿に失敗した
@@ -233,14 +246,14 @@ docker compose logs -f     # "activate the bot  now!!!!" が出れば成功
 
 ### 管理者向け: まとめて登録する
 
-管理者が `/bulk_register` を実行すると、`app/main.py` に書かれたメンバーをまとめて登録します (登録済みの人は飛ばします)。
+管理者が `/admin bulk_register` を実行すると、`app/main.py` に書かれたメンバーをまとめて登録します (登録済みの人は飛ばします)。
 
 | group | 登録されるメンバー |
 |---|---|
 | テスト用 | `TEST_USERS` |
 | 他高専テスト用 | `OTHER_KOSEN_USERS` |
 
-`/bulk_register` で登録した人は管理者の ID で登録されています。本人が `/notify` や「あなたの順位」を使えるように、`/user_link atcoder_name member` で本人の Discord アカウントに紐づけてください。
+`/admin bulk_register` で登録した人は管理者の ID で登録されています。本人が `/notify set` や「あなたの順位」を使えるように、`/admin link atcoder_name member` で本人の Discord アカウントに紐づけてください。
 
 メンバーを変えたいときは、`app/main.py` の `TEST_USERS` / `OTHER_KOSEN_USERS` を書き換えてください。
 
@@ -255,7 +268,7 @@ docker compose logs -f     # "activate the bot  now!!!!" が出れば成功
 | グラフが出ない / 送信に失敗する | Bot に **Attach Files** と **Embed Links** の権限があるか確認する |
 | ABC の結果や週次レポートが投稿されない | `RANKING_CHANNEL_ID` が正しいか、Bot がそのチャンネルを見られるか確認する |
 | 再起動したら登録が消えた | データベースがコンテナの中にある。手順5-B の `docker compose` で起動する (データは `data/` に残る) |
-| 「⚠️ エラーが発生しました」と出る | 管理者に DM で詳細が届いている。`/bot_status` の「直近のエラー」や、ターミナル (Docker なら `docker compose logs`) でも確認できる |
+| 「⚠️ エラーが発生しました」と出る | 管理者に DM で詳細が届いている。`/admin status` の「直近のエラー」や、ターミナル (Docker なら `docker compose logs`) でも確認できる |
 
 ---
 

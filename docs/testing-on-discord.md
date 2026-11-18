@@ -34,18 +34,21 @@ python main.py
 
 ## 4. 確認すること (チェックリスト)
 
-- [ ] `/user_register` で自分を登録できる (`REQUIRE_ATCODER_VERIFICATION=true` にすると、`/user_verify` の流れも試せる)
-- [ ] `/syozin` で、今日の総合AC・新規ACが表示される
-- [ ] `/bulk_register` で何人か登録してから `/diligence_growth 1週間` を実行し、◀ ▶ ボタンでページが切り替わる。グラフはどのページでも Embed の中に表示される
+- [ ] `/user register` で自分を登録できる (`REQUIRE_ATCODER_VERIFICATION=true` にすると、`/user verify` の流れも試せる)
+- [ ] `/syozin record` で、今日の総合AC・新規ACが表示される
+- [ ] `/admin bulk_register` で何人か登録してから `/ranking ac 1週間` を実行し、◀ ▶ ボタンでページが切り替わる。グラフはどのページでも Embed の中に表示される
 - [ ] ボタンが15分後に押せなくなる
-- [ ] `/recommend`、`/diligence_score 1週間`、`/versus` が表示され、問題のリンクが正しく開ける
-- [ ] `/diligence_growth 1週間 color:緑色` で同じ色の人だけが出る
-- [ ] `/notify` でオンにすると DM が届く (22時の連続ACリマインド、月曜9時の週次ふり返り)
-- [ ] `/bulk_register` した人に `/user_link` を実行すると、本人が `/notify` を使えるようになる
+- [ ] `/syozin recommend`、`/ranking score 1週間`、`/syozin versus` が表示され、問題のリンクが正しく開ける
+- [ ] `/ranking ac 1週間 color:緑色` で同じ色の人だけが出る
+- [ ] `/notify set` でオンにすると DM が届く (22時の連続ACリマインド、月曜9時の週次ふり返り)
+- [ ] `/admin bulk_register` した人に `/admin link` を実行すると、本人が `/notify set` を使えるようになる
 - [ ] ABC の30分前と10分前にリマインドが出る (それぞれ1回だけ)
-- [ ] `/contest_dm minutes:15` で確認の DM が届き、ABC の15分前に DM が1回だけ届く。`/contest_dm` で設定が表示される
+- [ ] `/notify contest minutes:15` で確認の DM が届き、ABC の15分前に DM が1回だけ届く。`/notify contest` で設定が表示される
 - [ ] 実績は、過去の分がまとめて投稿されず、新しく達成したときだけ投稿される
-- [ ] `/everyone_state`、`/user_list`、`/abc_ranking 483` が表示される
-- [ ] `/bot_status` は管理者だけに見え、管理者以外には断りのメッセージが出る
+- [ ] `/ranking total`、`/user list`、`/ranking abc 483` が表示される
+- [ ] `/` を入力すると `/user` `/ranking` `/syozin` `/notify` `/admin` `/help` の6つだけが並び、グループを選ぶと中のコマンドが出る
+- [ ] `/help` で一覧が自分にだけ表示される
+- [ ] `/syozin graph 1週間` で累積AC数のグラフ (横軸が日付) が表示され、`kind:新規AC` や `atcoder_name` の指定でも描ける
+- [ ] `/admin status` は管理者だけに見え、管理者以外には断りのメッセージが出る
 - [ ] わざとエラーを起こすと (例: 起動中に DB ファイルを消す)、管理者に DM が届く
 - [ ] 月曜の週次投稿と ABC の自動投稿は、`RANKING_CHANNEL_ID` のチャンネルに出る (すぐ試したいときは、DB の `bot_state` で `prev_contest` を1つ前の番号にする)

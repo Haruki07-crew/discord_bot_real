@@ -10,7 +10,7 @@ description: Discord のスラッシュコマンドを新しく追加する、�
 ```python
 ## @brief 何をするコマンドか (1行)
 ## @param interaction Discordのインタラクション
-@tree.command(name="command_name", description="コマンドの説明 (日本語、100文字以内)")
+@ranking_group.command(name="command_name", description="コマンドの説明 (日本語、100文字以内)")
 async def command_name(interaction: discord.Interaction, atcoder_name: str):
   await interaction.response.defer()          # 3秒以内に応答しないと失敗するので最初に defer
   try:
@@ -30,6 +30,11 @@ async def command_name(interaction: discord.Interaction, atcoder_name: str):
 ```
 
 ## チェックリスト
+
+- **グループ**
+  - コマンドは `user_group` / `ranking_group` / `syozin_group` / `notify_group` / `admin_group` のどれかに入れる (`@tree.command` で一番上に増やさない)
+  - 1グループ25個までが Discord の上限。`/help` の一覧はグループから自動で作られる
+  - エラー報告の名前は `report_command_error(interaction, "ranking command_name", e)` のようにグループ名から書く
 
 - **Embed**
   - `discord.Embed` に直接 `add_field` しない。人数分の一覧は `build_pages()` でページに分ける(1000人いても1通で済む)

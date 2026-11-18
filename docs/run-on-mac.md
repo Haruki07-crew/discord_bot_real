@@ -121,10 +121,10 @@ caffeinate -dis
 
 1. メッセージ欄に `/` を入力して、Bot のコマンドが候補に出るか確かめる。
    - 出ないときは、Discord を `Cmd + R` で再読み込みしてください。反映まで数分かかることもあります。
-2. `/user_register` で自分を登録する。
-3. `/syozin` で自分の記録を表示する。
-4. `/bot_status` を実行する (管理者だけが使えます)。同期の進み具合が表示されれば OK です。
-5. 新しい機能を試す: `/recommend`、`/versus`、`/diligence_score`、`/notify`
+2. `/user register` で自分を登録する。
+3. `/syozin record` で自分の記録を表示する。
+4. `/admin status` を実行する (管理者だけが使えます)。同期の進み具合が表示されれば OK です。
+5. 新しい機能を試す: `/syozin recommend`、`/syozin versus`、`/ranking score`、`/notify set`
 
 試すことの一覧は [testing-on-discord.md](testing-on-discord.md) のチェックリストにあります。
 登録した直後は過去の提出を取り込んでいる途中なので、全員分のデータがそろうまで数分〜数十分かかります。
@@ -134,11 +134,11 @@ caffeinate -dis
 | 時刻 | 起きること |
 |---|---|
 | 毎日 1:00 | DB のバックアップ (`data/backups/`) |
-| 毎日 22:00 | `/notify` で連続ACの通知をオンにした人に DM |
+| 毎日 22:00 | `/notify set` で連続ACの通知をオンにした人に DM |
 | ABC 開始の30分前と10分前 | チャンネルにリマインドを投稿 |
 | ABC 終了後 | 結果ランキングを投稿 |
 | 30分ごと | 新しく達成した実績を投稿 |
-| 月曜 9:00 | `/notify` で週次ふり返りをオンにした人に DM |
+| 月曜 9:00 | `/notify set` で週次ふり返りをオンにした人に DM |
 
 ---
 

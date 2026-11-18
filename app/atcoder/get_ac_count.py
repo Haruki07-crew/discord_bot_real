@@ -12,7 +12,7 @@ async def get_ac_count(atcoder_name, db_file="database.db"):
     row = cursor.fetchone()
     # 一度でも提出の取得に成功していればキャッシュを使う。
     # (提出が1件も無いユーザーは submission_last_id が 0 のままなので、それだけで判定すると
-    #  API にフォールバックして 404 で例外になり、/everyone_state 全体が失敗していた)
+    #  API にフォールバックして 404 で例外になり、/ranking total 全体が失敗していた)
     if row and ((row[0] and row[0] > 0) or (row[1] and row[1] > 0)):
       cursor.execute(
         "SELECT COUNT(DISTINCT problem_id) FROM ac_submissions_cache WHERE atcoder_name = ?",

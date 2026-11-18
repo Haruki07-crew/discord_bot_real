@@ -583,7 +583,7 @@ class TestMonitoring(Base):
     it = FakeInteraction(self.rec)
     self.run_async(self.ns["everyone_state"].callback(it))
     self.assertIn("管理者に自動で通知", self.rec.titles()[-1])
-    self.assertIn("/everyone_state", self.dms[0])
+    self.assertIn("/ranking total", self.dms[0])
     self.assertIn("db is broken", self.dms[0])
     self.assertEqual(len(self.alerts.recent_errors), 1)
 
@@ -770,6 +770,54 @@ class TestEngagement(Base):
     contests[0]["id"] = "abc501"
     self.assertEqual(due(8), [10])
     self.assertEqual(due(7), [])
+
+  def test_cumulative_series_matches_period_count(self):
+    t0 = today_start().timestamp()
+    add_ac(self.db, "alice", 1, "abc1_a", t0 - 10 * 86400)   # 期間より前に解いた
+    add_ac(self.db, "alice", 2, "abc1_a", t0 - 2 * 86400)    # 解き直し (総合ACだけ数える)
+    add_ac(self.db, "alice", 3, "abc1_b", t0 - 2 * 86400 + 5)
+    add_ac(self.db, "alice", 4, "abc1_b", t0 - 2 * 86400 + 9)  # 同じ日の再AC は数えない
+    add_ac(self.db, "alice", 5, "abc1_c", t0 + 60)
+    get = self.ns["get_cumulative_ac_series"]
+    total, new = get("alice", 7, self.db, "total"), get("alice", 7, self.db, "new")
+    counted = self.run_async(self.ns["count_period_ac"]("alice", 7, self.db))
+    self.assertEqual([n for _t, n in total], [1, 2, 3])
+    self.assertEqual(total[-1][1], counted[0])
+    self.assertEqual(new[-1][1], counted[2])
+    self.assertEqual([t for t, _n in total], sorted(t for t, _n in total))
+    png = self.ns["create_cumulative_ac_graph"]({"alice": total, "bob": []}, 7, "test")
+    self.assertTrue(png.getvalue().startswith(b"\x89PNG"))
+    self.assertIsNone(self.ns["create_cumulative_ac_graph"]({"bob": []}, 7, "test"))
+
+  def test_cumulative_graph_command(self):
+    import discord
+    t0 = today_start().timestamp()
+    add_ac(self.db, "alice", 1, "abc1_a", t0 + 60)
+    add_ac(self.db, "bob", 2, "abc1_a", t0 + 60)
+    add_ac(self.db, "bob", 3, "abc1_b", t0 + 120)
+    week = discord.app_commands.Choice(name="1週間", value=7)
+    it = FakeInteraction(self.rec, user_id=5)
+    self.run_async(self.ns["cumulative_graph"].callback(it, week, None, None))
+    embed = self.rec.sent[-1][1]
+    self.assertIn("累積総合AC", embed.title)
+    self.assertIn("bob", embed.fields[0].name)        # 多い順
+    self.assertIn("1位", embed.fields[0].name)
+    self.assertIn("alice", embed.description)          # 実行した本人の順位
+    it2 = FakeInteraction(self.rec, user_id=5)
+    self.run_async(self.ns["cumulative_graph"].callback(it2, week, None, "nobody"))
+    self.assertIn("登録されていません", self.rec.sent[-1][2])
+
+  def test_commands_are_grouped_and_help_lists_them(self):
+    tree = self.ns["tree"]
+    top = {c.name for c in tree.get_commands()}
+    self.assertEqual(top, {"user", "ranking", "syozin", "notify", "admin", "help"})
+    for group in tree.get_commands():
+      if hasattr(group, "commands"):
+        self.assertLessEqual(len(group.commands), 25)  # Discord の上限
+    embed = self.ns["build_help_embed"]()
+    text = "".join(f.value for f in embed.fields)
+    for name in ("/user register", "/ranking ac", "/syozin graph", "/notify contest", "/admin status"):
+      self.assertIn(name, text)
 
   def test_contest_dm_command_and_delivery(self):
     import discord
